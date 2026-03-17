@@ -19,6 +19,7 @@ export function getSupabaseBrowserClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      flowType: "pkce",
     },
   });
 
@@ -28,7 +29,6 @@ export function getSupabaseBrowserClient() {
 export async function getSession() {
   const client = getSupabaseBrowserClient();
   await client.auth.initialize();
-  await restoreSessionFromHash(client);
   const { data, error } = await client.auth.getSession();
 
   if (error) {
@@ -66,35 +66,4 @@ export async function signOut() {
   if (error) {
     throw error;
   }
-}
-
-async function restoreSessionFromHash(client) {
-  if (typeof window === "undefined" || !window.location.hash?.includes("access_token=")) {
-    return;
-  }
-
-  const hashParams = new URLSearchParams(window.location.hash.slice(1));
-  const accessToken = hashParams.get("access_token");
-  const refreshToken = hashParams.get("refresh_token");
-  const errorDescription = hashParams.get("error_description");
-
-  if (errorDescription) {
-    throw new Error(errorDescription);
-  }
-
-  if (!accessToken || !refreshToken) {
-    return;
-  }
-
-  const { error } = await client.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
-  window.history.replaceState({}, document.title, cleanUrl);
 }
