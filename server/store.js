@@ -1,0 +1,571 @@
+import { getGalleryBucket, getStorageBucket, getSupabaseAdmin } from "./supabase.js";
+
+export async function ensureStore() {
+  getSupabaseAdmin();
+}
+
+export async function readStore() {
+  const supabase = getSupabaseAdmin();
+  const [galleriesResult, legacyGuestsResult, peopleResult, personEncodingsResult, photosResult, photoFacesResult] =
+    await Promise.all([
+      supabase.from("galleries").select("*").order("created_at", { ascending: false }),
+      supabase.from("guests").select("*").order("created_at", { ascending: false }),
+      supabase.from("persons").select("*").order("created_at", { ascending: false }),
+      supabase.from("person_face_encodings").select("person_id"),
+      supabase.from("photos").select("*").order("created_at", { ascending: false }),
+      supabase.from("photo_faces").select("photo_id"),
+    ]);
+
+  throwIfError(galleriesResult.error);
+  throwIfError(legacyGuestsResult.error);
+  throwIfError(peopleResult.error);
+  throwIfError(personEncodingsResult.error);
+  throwIfError(photosResult.error);
+  throwIfError(photoFacesResult.error);
+
+  const personEncodingCountByPersonId = countById((personEncodingsResult.data || []).map((row) => row.person_id));
+  const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
+  const legacyGuests = await Promise.all((legacyGuestsResult.data || []).map(toLegacyGuestRecord));
+  const people = await Promise.all(
+    (peopleResult.data || []).map((row) => toPersonRecord(row, personEncodingCountByPersonId.get(row.id) || 0)),
+  );
+  const photos = await Promise.all((photosResult.data || []).map((row) => toPhotoRecord(row, photoFaceCountByPhotoId)));
+
+  return {
+    galleries: (galleriesResult.data || []).map(toGalleryRecord),
+    people,
+    guests: mergeGuests(legacyGuests, people),
+    photos,
+  };
+}
+
+export function parseDriveId(link) {
+  if (!link) {
+    return "";
+  }
+
+  const patterns = [
+    /\/folders\/([a-zA-Z0-9_-]+)/,
+    /\/file\/d\/([a-zA-Z0-9_-]+)/,
+    /[?&]id=([a-zA-Z0-9_-]+)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = link.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return "";
+}
+
+export function buildDriveThumbnailUrl(driveFileId) {
+  return `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1200`;
+}
+
+export function findGalleryById(store, galleryId) {
+  return store.galleries.find((gallery) => gallery.id === galleryId);
+}
+
+export function findGalleryBySlug(store, slug) {
+  return store.galleries.find((gallery) => gallery.slug === slug);
+}
+
+export function findPhotoById(store, photoId) {
+  return store.photos.find((photo) => photo.id === photoId);
+}
+
+export async function upsertGallery(input) {
+  const supabase = getSupabaseAdmin();
+  const existingResult = await supabase.from("galleries").select("*").eq("slug", input.slug).maybeSingle();
+  throwIfError(existingResult.error);
+
+  const payload = {
+    title: input.title,
+    slug: input.slug,
+    drive_link: input.driveLink,
+    drive_folder_id: input.driveFolderId,
+    is_public: input.isPublic,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingResult.data) {
+    const updateResult = await supabase
+      .from("galleries")
+      .update(payload)
+      .eq("id", existingResult.data.id)
+      .select("*")
+      .single();
+    throwIfError(updateResult.error);
+    return toGalleryRecord(updateResult.data);
+  }
+
+  const insertResult = await supabase
+    .from("galleries")
+    .insert({
+      ...payload,
+      created_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+  return toGalleryRecord(insertResult.data);
+}
+
+export async function saveGalleryDriveConnection(input) {
+  const supabase = getSupabaseAdmin();
+  const updateResult = await supabase
+    .from("galleries")
+    .update({
+      drive_refresh_token: input.refreshToken,
+      drive_connected_email: input.email || null,
+      drive_connected_name: input.name || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.galleryId)
+    .select("*")
+    .single();
+
+  throwIfError(updateResult.error);
+  return toGalleryRecord(updateResult.data);
+}
+
+export async function getGalleryDriveConnection(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("galleries")
+    .select("id, drive_refresh_token, drive_connected_email, drive_connected_name")
+    .eq("id", galleryId)
+    .maybeSingle();
+
+  throwIfError(result.error);
+
+  if (!result.data) {
+    return null;
+  }
+
+  return {
+    galleryId: result.data.id,
+    refreshToken: result.data.drive_refresh_token || "",
+    email: result.data.drive_connected_email || "",
+    name: result.data.drive_connected_name || "",
+  };
+}
+
+export async function addPerson(input) {
+  const supabase = getSupabaseAdmin();
+  const insertResult = await supabase
+    .from("persons")
+    .insert({
+      gallery_id: input.galleryId,
+      name: input.name,
+      reference_image_path: input.referenceImagePath || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+  return toPersonRecord(insertResult.data, 0);
+}
+
+export async function findPersonById(personId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("persons").select("*").eq("id", personId).maybeSingle();
+  throwIfError(result.error);
+
+  if (!result.data) {
+    return null;
+  }
+
+  const encodingCount = await countPersonEncodings(result.data.id);
+  return toPersonRecord(result.data, encodingCount);
+}
+
+export async function addPersonFaceEncoding(input) {
+  const supabase = getSupabaseAdmin();
+  const insertResult = await supabase
+    .from("person_face_encodings")
+    .insert({
+      gallery_id: input.galleryId,
+      person_id: input.personId,
+      source: input.source || "selfie",
+      source_image_path: input.sourceImagePath || null,
+      source_mime_type: input.sourceMimeType || null,
+      box_top: sanitizeBoxValue(input.box?.top),
+      box_right: sanitizeBoxValue(input.box?.right),
+      box_bottom: sanitizeBoxValue(input.box?.bottom),
+      box_left: sanitizeBoxValue(input.box?.left),
+      encoding: input.encoding,
+      created_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+
+  if (input.sourceImagePath) {
+    const updateResult = await supabase
+      .from("persons")
+      .update({
+        reference_image_path: input.sourceImagePath,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.personId)
+      .select("*")
+      .single();
+    throwIfError(updateResult.error);
+  }
+
+  return toPersonFaceEncodingRecord(insertResult.data);
+}
+
+export async function listPersonFaceEncodings(personId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("person_face_encodings")
+    .select("*")
+    .eq("person_id", personId)
+    .order("created_at", { ascending: false });
+  throwIfError(result.error);
+  return (result.data || []).map(toPersonFaceEncodingRecord);
+}
+
+export async function addPhoto(input) {
+  const supabase = getSupabaseAdmin();
+  const insertResult = await supabase
+    .from("photos")
+    .insert({
+      gallery_id: input.galleryId,
+      title: input.title,
+      drive_link: input.driveLink,
+      drive_file_id: input.driveFileId,
+      thumbnail_url: input.thumbnailUrl,
+      storage_bucket: input.storageBucket || null,
+      storage_object_path: input.storageObjectPath || null,
+      source_mime_type: input.sourceMimeType || null,
+      drive_modified_time: input.driveModifiedTime || null,
+      drive_checksum: input.driveChecksum || null,
+      drive_file_size_bytes: input.driveFileSizeBytes || null,
+      image_width: input.imageWidth || null,
+      image_height: input.imageHeight || null,
+      captured_at: input.capturedAt || null,
+      guest_ids: input.guestIds,
+      source: input.source || "manual",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+  return toPhotoRecord(insertResult.data, new Map());
+}
+
+export async function upsertDrivePhoto(input) {
+  const supabase = getSupabaseAdmin();
+  const existingResult = await supabase
+    .from("photos")
+    .select("*")
+    .eq("gallery_id", input.galleryId)
+    .eq("drive_file_id", input.driveFileId)
+    .maybeSingle();
+  throwIfError(existingResult.error);
+
+  const payload = {
+    title: input.title,
+    drive_link: input.driveLink,
+    drive_file_id: input.driveFileId,
+    thumbnail_url: input.thumbnailUrl,
+    storage_bucket: input.storageBucket || null,
+    storage_object_path: input.storageObjectPath || null,
+    source_mime_type: input.sourceMimeType || null,
+    drive_modified_time: input.driveModifiedTime || null,
+    drive_checksum: input.driveChecksum || null,
+    drive_file_size_bytes: input.driveFileSizeBytes || null,
+    image_width: input.imageWidth || null,
+    image_height: input.imageHeight || null,
+    captured_at: input.capturedAt || null,
+    source: "drive_sync",
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingResult.data) {
+    const updateResult = await supabase
+      .from("photos")
+      .update(payload)
+      .eq("id", existingResult.data.id)
+      .select("*")
+      .single();
+    throwIfError(updateResult.error);
+    return toPhotoRecord(updateResult.data, new Map());
+  }
+
+  const insertResult = await supabase
+    .from("photos")
+    .insert({
+      gallery_id: input.galleryId,
+      guest_ids: [],
+      created_at: new Date().toISOString(),
+      ...payload,
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+  return toPhotoRecord(insertResult.data, new Map());
+}
+
+export async function listDriveSyncStatesByGallery(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("photos")
+    .select("id, drive_file_id, drive_modified_time, drive_checksum, drive_file_size_bytes")
+    .eq("gallery_id", galleryId)
+    .eq("source", "drive_sync");
+  throwIfError(result.error);
+
+  return (result.data || []).map((row) => ({
+    id: row.id,
+    driveFileId: row.drive_file_id,
+    driveModifiedTime: row.drive_modified_time,
+    driveChecksum: row.drive_checksum,
+    driveFileSizeBytes: row.drive_file_size_bytes,
+  }));
+}
+
+export async function replacePhotoFacesForPhoto(input) {
+  const supabase = getSupabaseAdmin();
+  const deleteResult = await supabase.from("photo_faces").delete().eq("photo_id", input.photoId);
+  throwIfError(deleteResult.error);
+
+  if (!input.faces.length) {
+    return [];
+  }
+
+  const insertPayload = input.faces.map((face, index) => ({
+    gallery_id: input.galleryId,
+    photo_id: input.photoId,
+    face_index: index,
+    box_top: sanitizeBoxValue(face.box?.top),
+    box_right: sanitizeBoxValue(face.box?.right),
+    box_bottom: sanitizeBoxValue(face.box?.bottom),
+    box_left: sanitizeBoxValue(face.box?.left),
+    encoding: face.encoding,
+    created_at: new Date().toISOString(),
+  }));
+
+  const insertResult = await supabase.from("photo_faces").insert(insertPayload).select("*");
+  throwIfError(insertResult.error);
+  return (insertResult.data || []).map(toPhotoFaceRecord);
+}
+
+export async function listPhotoFacesByGallery(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("photo_faces").select("*").eq("gallery_id", galleryId);
+  throwIfError(result.error);
+  return (result.data || []).map(toPhotoFaceRecord);
+}
+
+export async function saveUpload(fileName, buffer) {
+  const supabase = getSupabaseAdmin();
+  const bucket = getStorageBucket();
+  const objectPath = `person-selfies/${fileName}`;
+  const uploadResult = await supabase.storage.from(bucket).upload(objectPath, buffer, {
+    contentType: inferContentType(fileName),
+    upsert: false,
+  });
+  throwIfError(uploadResult.error);
+  return objectPath;
+}
+
+export async function saveGalleryImage(fileName, buffer, mimeType) {
+  const supabase = getSupabaseAdmin();
+  const bucket = getGalleryBucket();
+  const objectPath = fileName;
+  const uploadResult = await supabase.storage.from(bucket).upload(objectPath, buffer, {
+    contentType: mimeType,
+    upsert: true,
+  });
+  throwIfError(uploadResult.error);
+
+  return {
+    bucket,
+    objectPath,
+  };
+}
+
+async function createSignedImageUrl(objectPath) {
+  if (!objectPath) {
+    return "";
+  }
+
+  const supabase = getSupabaseAdmin();
+  const bucket = getStorageBucket();
+  const signedResult = await supabase.storage.from(bucket).createSignedUrl(objectPath, 60 * 60);
+  throwIfError(signedResult.error);
+  return signedResult.data?.signedUrl || "";
+}
+
+async function createSignedStorageUrl(bucket, objectPath) {
+  if (!bucket || !objectPath) {
+    return "";
+  }
+
+  const supabase = getSupabaseAdmin();
+  const signedResult = await supabase.storage.from(bucket).createSignedUrl(objectPath, 60 * 60);
+  throwIfError(signedResult.error);
+  return signedResult.data?.signedUrl || "";
+}
+
+async function toLegacyGuestRecord(row) {
+  return {
+    id: row.id,
+    galleryId: row.gallery_id,
+    name: row.name,
+    faceHash: row.face_hash,
+    faceProfile: row.face_profile,
+    referenceImagePath: row.reference_image_path,
+    referenceImageUrl: await createSignedImageUrl(row.reference_image_path),
+    selfieCount: row.face_profile?.encoding ? 1 : 0,
+    kind: "legacy_guest",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function toPersonRecord(row, selfieCount) {
+  return {
+    id: row.id,
+    galleryId: row.gallery_id,
+    name: row.name,
+    referenceImagePath: row.reference_image_path,
+    referenceImageUrl: await createSignedImageUrl(row.reference_image_path),
+    selfieCount,
+    kind: "person",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toGalleryRecord(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    slug: row.slug,
+    driveLink: row.drive_link,
+    driveFolderId: row.drive_folder_id,
+    hasDriveConnection: Boolean(row.drive_refresh_token),
+    isPublic: row.is_public,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function toPhotoRecord(row, photoFaceCountByPhotoId) {
+  const storageUrl = await createSignedStorageUrl(row.storage_bucket, row.storage_object_path);
+  return {
+    id: row.id,
+    galleryId: row.gallery_id,
+    title: row.title,
+    driveLink: row.drive_link,
+    driveFileId: row.drive_file_id,
+    thumbnailUrl: row.thumbnail_url,
+    driveThumbnailUrl: row.thumbnail_url,
+    storageImageUrl: storageUrl,
+    storageBucket: row.storage_bucket,
+    storageObjectPath: row.storage_object_path,
+    sourceMimeType: row.source_mime_type,
+    driveModifiedTime: row.drive_modified_time,
+    driveChecksum: row.drive_checksum,
+    driveFileSizeBytes: row.drive_file_size_bytes,
+    imageWidth: row.image_width,
+    imageHeight: row.image_height,
+    faceCount: photoFaceCountByPhotoId.get(row.id) || 0,
+    capturedAt: row.captured_at,
+    guestIds: row.guest_ids || [],
+    source: row.source || "manual",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPhotoFaceRecord(row) {
+  return {
+    id: row.id,
+    galleryId: row.gallery_id,
+    photoId: row.photo_id,
+    faceIndex: row.face_index,
+    box: {
+      top: row.box_top,
+      right: row.box_right,
+      bottom: row.box_bottom,
+      left: row.box_left,
+    },
+    encoding: row.encoding,
+    createdAt: row.created_at,
+  };
+}
+
+function toPersonFaceEncodingRecord(row) {
+  return {
+    id: row.id,
+    galleryId: row.gallery_id,
+    personId: row.person_id,
+    source: row.source,
+    sourceImagePath: row.source_image_path,
+    sourceMimeType: row.source_mime_type,
+    box: {
+      top: row.box_top,
+      right: row.box_right,
+      bottom: row.box_bottom,
+      left: row.box_left,
+    },
+    encoding: row.encoding,
+    createdAt: row.created_at,
+  };
+}
+
+async function countPersonEncodings(personId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("person_face_encodings").select("person_id").eq("person_id", personId);
+  throwIfError(result.error);
+  return (result.data || []).length;
+}
+
+function inferContentType(fileName) {
+  if (fileName.endsWith(".png")) {
+    return "image/png";
+  }
+
+  return "image/jpeg";
+}
+
+function sanitizeBoxValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+function throwIfError(error) {
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+function countById(ids) {
+  const counts = new Map();
+
+  for (const id of ids) {
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+
+  return counts;
+}
+
+function mergeGuests(legacyGuests, people) {
+  const merged = new Map();
+
+  for (const guest of [...legacyGuests, ...people]) {
+    merged.set(guest.id, guest);
+  }
+
+  return [...merged.values()];
+}
