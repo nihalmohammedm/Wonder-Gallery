@@ -359,7 +359,7 @@ async function transcodeJpegWithSips(buffer) {
 }
 
 async function transcodeAndResizeImageWithSips(buffer, inputExtension = "jpg", outputFormat = "jpeg", maxSize = PREVIEW_MAX_SIZE) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "wonder-gallery-jpeg-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "picdrop-jpeg-"));
   const safeInputExtension = inputExtension || "img";
   const outputExtension = outputFormat === "png" ? "png" : "jpg";
   const inputPath = path.join(tempDir, `input.${safeInputExtension}`);
@@ -375,7 +375,7 @@ async function transcodeAndResizeImageWithSips(buffer, inputExtension = "jpg", o
 }
 
 async function transcodeImageWithSips(buffer, inputExtension = "jpg", outputFormat = "jpeg") {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "wonder-gallery-jpeg-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "picdrop-jpeg-"));
   const safeInputExtension = inputExtension || "img";
   const outputExtension = outputFormat === "png" ? "png" : "jpg";
   const inputPath = path.join(tempDir, `input.${safeInputExtension}`);

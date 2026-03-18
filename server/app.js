@@ -27,10 +27,12 @@ import {
   addPersonFaceEncoding,
   addPhoto,
   buildDriveThumbnailUrl,
+  updateGalleryHeaderImage,
   findGalleryById,
   findGalleryBySlug,
   findPhotoById,
   findPersonById,
+  deleteGallery as deleteGalleryRecord,
   getGalleryDriveConnection,
   listDriveSyncStatesByGallery,
   listPersonFaceEncodings,
@@ -116,6 +118,45 @@ export function createApp() {
       });
 
       response.status(201).json({ gallery });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/galleries/:galleryId/header-image", upload.single("image"), async (request, response, next) => {
+    try {
+      if (!request.file) {
+        return response.status(400).json({ error: "image is required" });
+      }
+
+      const gallery = await updateGalleryHeaderImage({
+        galleryId: request.params.galleryId,
+        buffer: request.file.buffer,
+        mimeType: request.file.mimetype,
+      });
+
+      if (!gallery) {
+        return response.status(404).json({ error: "Gallery not found" });
+      }
+
+      response.json({ gallery });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/galleries/:galleryId", async (request, response, next) => {
+    try {
+      const deletedGallery = await deleteGalleryRecord(request.params.galleryId);
+
+      if (!deletedGallery) {
+        return response.status(404).json({ error: "Gallery not found" });
+      }
+
+      response.json({
+        ok: true,
+        gallery: deletedGallery,
+      });
     } catch (error) {
       next(error);
     }

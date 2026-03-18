@@ -6,6 +6,7 @@ create table if not exists public.galleries (
   slug text not null unique,
   drive_link text not null,
   drive_folder_id text,
+  header_image_path text,
   drive_refresh_token text,
   drive_connected_email text,
   drive_connected_name text,
@@ -17,6 +18,7 @@ create table if not exists public.galleries (
 alter table public.galleries add column if not exists drive_refresh_token text;
 alter table public.galleries add column if not exists drive_connected_email text;
 alter table public.galleries add column if not exists drive_connected_name text;
+alter table public.galleries add column if not exists header_image_path text;
 
 create table if not exists public.guests (
   id uuid primary key default gen_random_uuid(),

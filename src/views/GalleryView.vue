@@ -1,6 +1,6 @@
 <template>
   <main class="shell">
-    <section class="gallery-hero">
+    <section class="gallery-hero" :style="heroStyle(gallery)">
       <div class="gallery-hero-top">
         <div class="gallery-hero-copy">
           <p class="gallery-kicker">Common Link</p>
@@ -130,5 +130,17 @@ function formatDate(value) {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
+}
+
+function heroStyle(galleryRecord) {
+  if (!galleryRecord?.headerImageUrl) {
+    return {};
+  }
+
+  return {
+    backgroundImage: `linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(236, 247, 255, 0.82)), url("${galleryRecord.headerImageUrl}")`,
+    backgroundPosition: "center",
+    backgroundSize: "cover",
+  };
 }
 </script>

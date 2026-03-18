@@ -76,6 +76,21 @@ export function createGallery(payload) {
   });
 }
 
+export function deleteGallery(galleryId) {
+  return request(`/admin/galleries/${galleryId}`, {
+    method: "DELETE",
+    auth: true,
+  });
+}
+
+export function uploadGalleryHeaderImage(galleryId, formData) {
+  return request(`/admin/galleries/${galleryId}/header-image`, {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+}
+
 export function createGuest(formData) {
   return request("/admin/guests", {
     method: "POST",

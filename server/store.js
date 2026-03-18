@@ -25,6 +25,7 @@ export async function readStore() {
 
   const personEncodingCountByPersonId = countById((personEncodingsResult.data || []).map((row) => row.person_id));
   const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
+  const galleries = await Promise.all((galleriesResult.data || []).map(toGalleryRecord));
   const legacyGuests = await Promise.all((legacyGuestsResult.data || []).map(toLegacyGuestRecord));
   const people = await Promise.all(
     (peopleResult.data || []).map((row) => toPersonRecord(row, personEncodingCountByPersonId.get(row.id) || 0)),
@@ -32,7 +33,7 @@ export async function readStore() {
   const photos = await Promise.all((photosResult.data || []).map((row) => toPhotoRecord(row, photoFaceCountByPhotoId)));
 
   return {
-    galleries: (galleriesResult.data || []).map(toGalleryRecord),
+    galleries,
     people,
     guests: mergeGuests(legacyGuests, people),
     photos,
@@ -98,7 +99,7 @@ export async function upsertGallery(input) {
       .select("*")
       .single();
     throwIfError(updateResult.error);
-    return toGalleryRecord(updateResult.data);
+    return await toGalleryRecord(updateResult.data);
   }
 
   const insertResult = await supabase
@@ -110,7 +111,7 @@ export async function upsertGallery(input) {
     .select("*")
     .single();
   throwIfError(insertResult.error);
-  return toGalleryRecord(insertResult.data);
+  return await toGalleryRecord(insertResult.data);
 }
 
 export async function saveGalleryDriveConnection(input) {
@@ -128,7 +129,90 @@ export async function saveGalleryDriveConnection(input) {
     .single();
 
   throwIfError(updateResult.error);
-  return toGalleryRecord(updateResult.data);
+  return await toGalleryRecord(updateResult.data);
+}
+
+export async function updateGalleryHeaderImage(input) {
+  const supabase = getSupabaseAdmin();
+  const galleryResult = await supabase.from("galleries").select("*").eq("id", input.galleryId).maybeSingle();
+  throwIfError(galleryResult.error);
+
+  if (!galleryResult.data) {
+    return null;
+  }
+
+  const objectPath = `${input.galleryId}/header-${Date.now()}.${inferImageExtension(input.mimeType)}`;
+  await saveGalleryImage(objectPath, input.buffer, input.mimeType);
+
+  if (galleryResult.data.header_image_path && galleryResult.data.header_image_path !== objectPath) {
+    await removeStorageObjects(getGalleryBucket(), [galleryResult.data.header_image_path]);
+  }
+
+  const updateResult = await supabase
+    .from("galleries")
+    .update({
+      header_image_path: objectPath,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.galleryId)
+    .select("*")
+    .single();
+  throwIfError(updateResult.error);
+
+  return await toGalleryRecord(updateResult.data);
+}
+
+export async function deleteGallery(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const [galleryResult, photosResult, peopleResult, legacyGuestsResult] = await Promise.all([
+    supabase.from("galleries").select("id, title, slug, header_image_path").eq("id", galleryId).maybeSingle(),
+    supabase.from("photos").select("storage_bucket, storage_object_path").eq("gallery_id", galleryId),
+    supabase.from("persons").select("reference_image_path").eq("gallery_id", galleryId),
+    supabase.from("guests").select("reference_image_path").eq("gallery_id", galleryId),
+  ]);
+
+  throwIfError(galleryResult.error);
+  throwIfError(photosResult.error);
+  throwIfError(peopleResult.error);
+  throwIfError(legacyGuestsResult.error);
+
+  if (!galleryResult.data) {
+    return null;
+  }
+
+  const galleryImagePathsByBucket = new Map();
+
+  for (const row of photosResult.data || []) {
+    if (!row.storage_bucket || !row.storage_object_path) {
+      continue;
+    }
+
+    const bucketPaths = galleryImagePathsByBucket.get(row.storage_bucket) || new Set();
+    bucketPaths.add(row.storage_object_path);
+    galleryImagePathsByBucket.set(row.storage_bucket, bucketPaths);
+  }
+
+  const referenceImagePaths = new Set(
+    [...(peopleResult.data || []), ...(legacyGuestsResult.data || [])]
+      .map((row) => row.reference_image_path)
+      .filter(Boolean),
+  );
+
+  for (const [bucket, paths] of galleryImagePathsByBucket) {
+    await removeStorageObjects(bucket, [...paths]);
+  }
+
+  await removeStorageObjects(getGalleryBucket(), [galleryResult.data.header_image_path].filter(Boolean));
+  await removeStorageObjects(getStorageBucket(), [...referenceImagePaths]);
+
+  const deleteResult = await supabase.from("galleries").delete().eq("id", galleryId).select("id").maybeSingle();
+  throwIfError(deleteResult.error);
+
+  return {
+    id: galleryResult.data.id,
+    title: galleryResult.data.title,
+    slug: galleryResult.data.slug,
+  };
 }
 
 export async function getGalleryDriveConnection(galleryId) {
@@ -446,13 +530,16 @@ async function toPersonRecord(row, selfieCount) {
   };
 }
 
-function toGalleryRecord(row) {
+async function toGalleryRecord(row) {
+  const headerImageUrl = await createSignedStorageUrl(getGalleryBucket(), row.header_image_path);
   return {
     id: row.id,
     title: row.title,
     slug: row.slug,
     driveLink: row.drive_link,
     driveFolderId: row.drive_folder_id,
+    headerImagePath: row.header_image_path || "",
+    headerImageUrl,
     hasDriveConnection: Boolean(row.drive_refresh_token),
     isPublic: row.is_public,
     createdAt: row.created_at,
@@ -539,6 +626,18 @@ function inferContentType(fileName) {
   return "image/jpeg";
 }
 
+function inferImageExtension(mimeType) {
+  if (mimeType === "image/png") {
+    return "png";
+  }
+
+  if (mimeType === "image/webp") {
+    return "webp";
+  }
+
+  return "jpg";
+}
+
 function sanitizeBoxValue(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed) : 0;
@@ -547,6 +646,20 @@ function sanitizeBoxValue(value) {
 function throwIfError(error) {
   if (error) {
     throw new Error(error.message);
+  }
+}
+
+async function removeStorageObjects(bucket, paths) {
+  if (!bucket || !paths.length) {
+    return;
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  for (let index = 0; index < paths.length; index += 100) {
+    const batch = paths.slice(index, index + 100);
+    const removeResult = await supabase.storage.from(bucket).remove(batch);
+    throwIfError(removeResult.error);
   }
 }
 

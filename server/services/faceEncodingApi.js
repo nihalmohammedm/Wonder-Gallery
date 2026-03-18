@@ -39,7 +39,7 @@ export async function ensureFaceEncodingApiAvailable() {
 export async function extractFaceEncodings(buffer, mimeType) {
   const apiUrl = getApiUrl();
   const url = new URL("/v1/faces/encodings", apiUrl);
-  url.searchParams.set("detection_model", process.env.FACE_ENCODING_DETECTION_MODEL || "hog");
+  url.searchParams.set("detection_model", process.env.FACE_ENCODING_DETECTION_MODEL || "cnn");
   url.searchParams.set("encoding_model", process.env.FACE_ENCODING_MODEL || "small");
   url.searchParams.set("num_jitters", process.env.FACE_ENCODING_NUM_JITTERS || "1");
   url.searchParams.set("upsample_times", process.env.FACE_ENCODING_UPSAMPLE_TIMES || "1");

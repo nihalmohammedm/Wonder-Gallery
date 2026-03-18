@@ -9,7 +9,7 @@ await ensureStore();
 const app = createApp();
 
 app.listen(port, () => {
-  console.log(`Wonder Gallery API running on http://localhost:${port}`);
+  console.log(`PicDrop API running on http://localhost:${port}`);
   if (autoDriveSyncIntervalMs > 0) {
     console.log(`Automatic Drive sync scheduled every ${Math.round(autoDriveSyncIntervalMs / (60 * 1000))} minute(s).`);
   }

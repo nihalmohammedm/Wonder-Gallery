@@ -2,7 +2,7 @@
   <main class="shell landing-shell">
     <section class="hero-card">
       <p class="eyebrow">Vue + API Architecture</p>
-      <h1>Wonder Gallery</h1>
+      <h1>PicDrop</h1>
       <p class="hero-copy">
         Admins register a gallery, connect a Google Drive folder, and sync event photos into the app.
         Guests open a public link, take a selfie, and the server compares that selfie against face encodings extracted from the event photos.

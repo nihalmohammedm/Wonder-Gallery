@@ -1,19 +1,6 @@
 <template>
-  <main class="shell">
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">Admin Panel</p>
-        <h1>Wonder Gallery</h1>
-      </div>
-      <nav class="header-actions">
-        <RouterLink class="button button-secondary" to="/">Overview</RouterLink>
-        <button v-if="session" class="button button-primary" type="button" :disabled="authBusy" @click="logout">
-          Sign Out
-        </button>
-      </nav>
-    </header>
-
-    <section v-if="!authReady" class="panel">
+  <main class="shell admin-shell">
+    <section v-if="!authReady" class="panel admin-full">
       <div class="panel-header">
         <div>
           <p class="eyebrow">Authentication</p>
@@ -23,31 +10,13 @@
       <p class="helper-copy">Verifying whether you already have an active admin login.</p>
     </section>
 
-    <section v-if="true" class="panel">
-      <div class="panel-header">
-        <div>
-          <p class="eyebrow">Auth Debug</p>
-          <h2>Session Diagnostics</h2>
-        </div>
-      </div>
-      <div class="summary-metrics">
-        <span class="metric">Origin: {{ debugState.origin }}</span>
-        <span class="metric">Hash: {{ debugState.hash ? "present" : "empty" }}</span>
-        <span class="metric">Ready: {{ authReady ? "yes" : "no" }}</span>
-        <span class="metric">Session: {{ session ? "present" : "missing" }}</span>
-      </div>
-      <p><strong>Email:</strong> <span>{{ debugState.email || "none" }}</span></p>
-      <p><strong>Provider:</strong> <span>{{ debugState.provider || "none" }}</span></p>
-      <p><strong>Last auth event:</strong> <span>{{ debugState.lastEvent || "none" }}</span></p>
-      <p><strong>Last API error:</strong> <span>{{ debugState.lastApiError || "none" }}</span></p>
-    </section>
-
-    <section v-if="authReady && !session" class="panel">
+    <section v-else-if="!session" class="panel admin-full">
       <div class="panel-header">
         <div>
           <p class="eyebrow">Authentication</p>
           <h2>Sign in with Google</h2>
         </div>
+        <RouterLink class="button button-secondary" to="/">Overview</RouterLink>
       </div>
       <p class="helper-copy">
         Admin actions are protected. Sign in with Google to create galleries, sync Drive folders, and manage event photos.
@@ -59,9 +28,189 @@
       </div>
     </section>
 
-    <div v-if="authReady && session" class="two-column-layout">
-      <div class="column-stack">
-        <section class="panel">
+    <template v-else>
+      <aside class="admin-sidebar">
+        <section class="panel admin-sidebar-panel">
+          <div class="admin-brand">
+            <div>
+              <p class="eyebrow">Admin Panel</p>
+              <h1>PicDrop</h1>
+            </div>
+            <div class="admin-sidebar-actions">
+              <RouterLink class="button button-secondary" to="/">Overview</RouterLink>
+              <button class="button button-primary" type="button" :disabled="authBusy" @click="logout">
+                Sign Out
+              </button>
+            </div>
+          </div>
+
+          <div class="summary-metrics">
+            <span class="metric">{{ galleries.length }} galleries</span>
+            <span class="metric">{{ photos.length }} photos</span>
+            <span class="metric">{{ guests.length }} guests</span>
+          </div>
+
+          <p class="helper-copy admin-session-copy">
+            Signed in as <strong>{{ session.user?.email || "Unknown account" }}</strong>
+          </p>
+        </section>
+
+        <section class="panel admin-sidebar-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Workspace</p>
+              <h2>Navigate</h2>
+            </div>
+          </div>
+
+          <div class="admin-nav">
+            <button
+              v-for="section in workspaceSections"
+              :key="section.id"
+              class="admin-nav-button"
+              type="button"
+              @click="scrollToSection(section.id)"
+            >
+              <span>{{ section.label }}</span>
+              <small>{{ section.caption }}</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel admin-sidebar-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Gallery Library</p>
+              <h2>Select Gallery</h2>
+            </div>
+          </div>
+
+          <div v-if="galleries.length" class="gallery-picker">
+            <button
+              v-for="gallery in galleries"
+              :key="gallery.id"
+              class="gallery-picker-item"
+              :class="{ 'is-active': gallery.id === selectedGallery?.id }"
+              type="button"
+              @click="setActiveGallery(gallery.id)"
+            >
+              <strong>{{ gallery.title }}</strong>
+              <span>{{ gallery.slug }}</span>
+              <small>{{ galleryPhotoCount(gallery.id) }} photos</small>
+            </button>
+          </div>
+          <div v-else class="empty-state">Create your first gallery to unlock the admin workspace.</div>
+        </section>
+
+        <section v-if="feedback || error" class="admin-message-stack">
+          <div v-if="feedback" class="status-card admin-message">{{ feedback }}</div>
+          <div v-if="error" class="status-card admin-message admin-message-error">{{ error }}</div>
+        </section>
+      </aside>
+
+      <section class="admin-workspace">
+        <section class="panel admin-workspace-hero">
+          <div class="admin-workspace-top">
+            <div>
+              <p class="eyebrow">Selected Gallery</p>
+              <h2>{{ selectedGallery?.title || "Create a gallery" }}</h2>
+              <p class="helper-copy">
+                {{
+                  selectedGallery
+                    ? "Work inside a single event context. Forms, gallery view, sync, and downloads stay tied to the selected gallery."
+                    : "Start by creating a gallery and connecting its Google Drive folder."
+                }}
+              </p>
+            </div>
+
+            <div v-if="selectedGallery" class="header-actions">
+              <button
+                class="button button-secondary"
+                type="button"
+                :disabled="saving.deleteGalleryId === selectedGallery.id"
+                @click="removeGallery(selectedGallery)"
+              >
+                {{ saving.deleteGalleryId === selectedGallery.id ? "Deleting..." : "Delete Gallery" }}
+              </button>
+              <button
+                class="button button-primary"
+                type="button"
+                :disabled="saving.connectDriveId === selectedGallery.id"
+                @click="connectDrive(selectedGallery)"
+              >
+                {{ saving.connectDriveId === selectedGallery.id ? "Redirecting..." : selectedGallery.hasDriveConnection ? "Reconnect Drive" : "Connect Drive" }}
+              </button>
+              <button
+                class="button button-primary"
+                type="button"
+                :disabled="saving.syncGalleryId === selectedGallery.id || !selectedGallery.hasDriveConnection"
+                @click="syncDriveGallery(selectedGallery)"
+              >
+                {{ saving.syncGalleryId === selectedGallery.id ? "Syncing..." : "Sync Drive" }}
+              </button>
+              <RouterLink class="button button-secondary" :to="`/g/${selectedGallery.slug}`">Personal Link</RouterLink>
+              <RouterLink class="button button-secondary" :to="`/g/${selectedGallery.slug}/all`">Common Link</RouterLink>
+            </div>
+          </div>
+
+          <div v-if="selectedGallery" class="admin-stat-grid">
+            <article class="gallery-stat">
+              <strong>{{ galleryPhotoCount(selectedGallery.id) }}</strong>
+              <span>Photos</span>
+            </article>
+            <article class="gallery-stat">
+              <strong>{{ galleryGuestCount(selectedGallery.id) }}</strong>
+              <span>Guests</span>
+            </article>
+            <article class="gallery-stat">
+              <strong>{{ galleryIndexedPhotoCount(selectedGallery.id) }}</strong>
+              <span>Indexed</span>
+            </article>
+            <article class="gallery-stat">
+              <strong>{{ selectedGallery.hasDriveConnection ? "Yes" : "No" }}</strong>
+              <span>Drive Connected</span>
+            </article>
+          </div>
+
+          <div v-if="selectedGallery" class="admin-link-grid">
+            <div class="admin-link-card">
+              <span class="eyebrow">Personal URL</span>
+              <p>{{ personalUrl(selectedGallery.slug) }}</p>
+            </div>
+            <div class="admin-link-card">
+              <span class="eyebrow">Common URL</span>
+              <p>{{ commonUrl(selectedGallery.slug) }}</p>
+            </div>
+            <div class="admin-link-card">
+              <span class="eyebrow">Drive Folder</span>
+              <p>
+                <a :href="selectedGallery.driveLink" target="_blank" rel="noreferrer">{{ selectedGallery.driveLink }}</a>
+              </p>
+            </div>
+            <div class="admin-link-card admin-cover-card">
+              <span class="eyebrow">Header Image</span>
+              <img
+                v-if="selectedGallery.headerImageUrl"
+                class="admin-cover-preview"
+                :src="selectedGallery.headerImageUrl"
+                :alt="`${selectedGallery.title} header`"
+              />
+              <p v-else>Upload a banner image to brand this gallery on the public pages.</p>
+              <label class="button button-secondary file-button">
+                {{ saving.headerImageGalleryId === selectedGallery.id ? "Uploading..." : selectedGallery.headerImageUrl ? "Replace Header Image" : "Upload Header Image" }}
+                <input
+                  hidden
+                  type="file"
+                  accept="image/*"
+                  :disabled="saving.headerImageGalleryId === selectedGallery.id"
+                  @change="uploadHeaderImage($event, selectedGallery)"
+                />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section id="gallery-setup" class="panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Step 1</p>
@@ -94,15 +243,15 @@
           </form>
         </section>
 
-        <section class="panel">
+        <section id="guest-library" class="panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Step 2</p>
-              <h2>Optional Reference Guests</h2>
+              <h2>Reference Guests</h2>
             </div>
           </div>
           <p class="helper-copy">
-            This is optional legacy data. The public selfie flow now matches directly against synced event photos.
+            Reference guests are optional. Use them when you want a curated person list or extra selfie anchors for a gallery.
           </p>
           <form class="form-grid" @submit.prevent="submitGuest">
             <label>
@@ -123,18 +272,21 @@
             <button class="button button-primary" type="submit" :disabled="saving.guest">Add Reference</button>
           </form>
 
-          <div v-if="guests.length" class="token-list">
-            <div v-for="guest in guests" :key="guest.id" class="token">
+          <div v-if="selectedGalleryGuests.length" class="token-list">
+            <div v-for="guest in selectedGalleryGuests" :key="guest.id" class="token token-guest">
               <img :src="guest.referenceImageUrl" :alt="`${guest.name} reference`" />
-              <span>{{ guest.name }}</span>
+              <div>
+                <strong>{{ guest.name }}</strong>
+                <p>{{ guest.selfieCount || 0 }} {{ guest.selfieCount === 1 ? "selfie" : "selfies" }}</p>
+              </div>
             </div>
           </div>
-          <div v-else class="empty-state">No guests registered yet.</div>
+          <div v-else class="empty-state">
+            {{ selectedGallery ? "No reference guests added for this gallery yet." : "Select or create a gallery first." }}
+          </div>
         </section>
-      </div>
 
-      <div class="column-stack">
-        <section class="panel">
+        <section id="photo-sources" class="panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Step 3</p>
@@ -142,7 +294,7 @@
             </div>
           </div>
           <p class="helper-copy">
-            Drive sync is the main ingestion path. Each synced image is stored and sent to the face-encoding API so matching can run on extracted face embeddings.
+            Drive sync is the primary ingestion path. Manual photo entries are useful when you need to map a single file immediately.
           </p>
           <form class="form-grid" @submit.prevent="submitPhoto">
             <label>
@@ -179,89 +331,118 @@
           </form>
         </section>
 
-        <section class="panel">
-          <div class="panel-header">
+        <section id="gallery-view" class="panel">
+          <div class="gallery-panel-title">
             <div>
-              <p class="eyebrow">Live Data</p>
-              <h2>Gallery Preview</h2>
+              <p class="eyebrow">Gallery View</p>
+              <h2>{{ selectedGallery?.title || "Photo Library" }}</h2>
+            </div>
+            <div v-if="selectedGalleryPhotos.length" class="summary-metrics">
+              <span class="metric">{{ selectedGalleryPhotos.length }} images</span>
+              <span class="metric">{{ galleryIndexedPhotoCount(selectedGallery.id) }} indexed</span>
             </div>
           </div>
-          <div v-if="galleries.length" class="summary-stack">
-            <article v-for="gallery in galleries" :key="gallery.id" class="summary-card">
-              <header>
-                <div>
-                  <h3>{{ gallery.title }}</h3>
-                  <p>{{ gallery.slug }}</p>
-                </div>
-                <div class="header-actions">
-                  <button
-                    class="button button-primary"
-                    type="button"
-                    :disabled="saving.connectDriveId === gallery.id"
-                    @click="connectDrive(gallery)"
-                  >
-                    {{ saving.connectDriveId === gallery.id ? "Redirecting..." : gallery.hasDriveConnection ? "Reconnect Drive" : "Connect Drive" }}
-                  </button>
-                  <button
-                    class="button button-primary"
-                    type="button"
-                    :disabled="saving.syncGalleryId === gallery.id || !gallery.hasDriveConnection"
-                    @click="syncDriveGallery(gallery)"
-                  >
-                    {{ saving.syncGalleryId === gallery.id ? "Syncing..." : "Sync Drive" }}
-                  </button>
-                  <RouterLink class="button button-secondary" :to="`/g/${gallery.slug}`">Personal Link</RouterLink>
-                  <RouterLink class="button button-secondary" :to="`/g/${gallery.slug}/all`">Common Link</RouterLink>
-                </div>
-              </header>
-              <div class="summary-metrics">
-                <span class="metric">{{ gallery.isPublic ? "Public" : "Private" }}</span>
-                <span class="metric">{{ galleryGuestCount(gallery.id) }} guests</span>
-                <span class="metric">{{ galleryPhotoCount(gallery.id) }} photos</span>
-                <span class="metric">{{ galleryIndexedPhotoCount(gallery.id) }} indexed</span>
-                <span class="metric">{{ gallery.hasDriveConnection ? "Drive connected" : "Drive not connected" }}</span>
-              </div>
-              <p><strong>Drive folder:</strong> <a :href="gallery.driveLink" target="_blank" rel="noreferrer">{{ gallery.driveLink }}</a></p>
-              <p><strong>Sync:</strong> Connect the organizer's Google account, then click Sync Drive to download and index the event photos from that folder.</p>
-              <p><strong>Personal URL:</strong> <span>{{ personalUrl(gallery.slug) }}</span></p>
-              <p><strong>Common URL:</strong> <span>{{ commonUrl(gallery.slug) }}</span></p>
-              <div class="photo-grid">
-                <article v-for="photo in galleryPhotos(gallery.id)" :key="photo.id" class="photo-card">
-                  <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
-                  <div>
-                    <h3>{{ photo.title }}</h3>
-                    <p>{{ formatDate(photo.capturedAt) }}</p>
-                    <p>Tagged: {{ photoGuestNames(photo) || "No guests tagged" }}</p>
-                    <p>Indexed faces: {{ photo.faceCount || 0 }}</p>
-                    <button
-                      class="button button-secondary"
-                      type="button"
-                      :disabled="saving.indexPhotoId === photo.id"
-                      @click="runPhotoIndex(photo)"
-                    >
-                      {{ saving.indexPhotoId === photo.id ? "Indexing..." : "Run Index" }}
-                    </button>
-                  </div>
-                </article>
-                <div v-if="!galleryPhotos(gallery.id).length" class="empty-state">No Drive photos added yet.</div>
-              </div>
-            </article>
-          </div>
-          <div v-else class="empty-state">Create a gallery to generate a public link and preview photos.</div>
-        </section>
-      </div>
-    </div>
 
-    <p v-if="feedback" class="footer-note">{{ feedback }}</p>
-    <p v-if="error" class="footer-error">{{ error }}</p>
+          <p class="helper-copy">
+            Tiles open a larger preview. Download uses the original Google Drive file directly when a Drive file id is available.
+          </p>
+
+          <div v-if="selectedGalleryPhotos.length" class="admin-gallery-grid">
+            <button
+              v-for="photo in selectedGalleryPhotos"
+              :key="photo.id"
+              class="gallery-tile"
+              type="button"
+              @click="openPhoto(photo)"
+            >
+              <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
+              <div class="gallery-tile-meta">
+                <h3>{{ photo.title }}</h3>
+                <p>{{ formatDate(photo.capturedAt) }}</p>
+                <div class="summary-metrics">
+                  <span class="metric">{{ photo.faceCount || 0 }} faces</span>
+                  <span class="metric">{{ photo.source === "drive_sync" ? "Drive sync" : "Manual" }}</span>
+                </div>
+              </div>
+            </button>
+          </div>
+          <div v-else class="empty-state">
+            {{ selectedGallery ? "No images are mapped to this gallery yet." : "Create a gallery to start building its image library." }}
+          </div>
+        </section>
+      </section>
+    </template>
+
+    <Teleport to="body">
+      <div v-if="activePhoto" class="lightbox" @click.self="closePhoto">
+        <article class="lightbox-panel">
+          <button class="lightbox-close" type="button" @click="closePhoto" aria-label="Close image preview">Close</button>
+          <div class="lightbox-stage">
+            <img :src="activePhoto.storageImageUrl || activePhoto.thumbnailUrl" :alt="activePhoto.title" />
+          </div>
+          <div class="lightbox-details">
+            <div>
+              <p class="eyebrow">Image Preview</p>
+              <h2>{{ activePhoto.title }}</h2>
+            </div>
+            <p class="helper-copy">
+              {{ formatDate(activePhoto.capturedAt) }} · {{ activePhoto.faceCount || 0 }} indexed face{{ activePhoto.faceCount === 1 ? "" : "s" }}
+            </p>
+            <p class="helper-copy">
+              Tagged guests: {{ photoGuestNames(activePhoto) || "No guests tagged" }}
+            </p>
+            <div class="button-row">
+              <a class="button button-secondary" :href="activePhoto.driveLink" target="_blank" rel="noreferrer">
+                Open in Drive
+              </a>
+              <a
+                v-if="activePhoto.driveFileId"
+                class="button button-primary"
+                :href="driveDownloadUrl(activePhoto)"
+                target="_blank"
+                rel="noreferrer"
+                download
+              >
+                Download Image
+              </a>
+              <button
+                class="button button-secondary"
+                type="button"
+                :disabled="saving.indexPhotoId === activePhoto.id"
+                @click="runPhotoIndex(activePhoto)"
+              >
+                {{ saving.indexPhotoId === activePhoto.id ? "Indexing..." : "Run Index" }}
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { createGallery, createGuest, createPhoto, getAdminSnapshot, getDriveAuthUrl, indexPhoto, syncGalleryDrive } from "../lib/api.js";
+import {
+  createGallery,
+  createGuest,
+  createPhoto,
+  deleteGallery,
+  getAdminSnapshot,
+  getDriveAuthUrl,
+  indexPhoto,
+  syncGalleryDrive,
+  uploadGalleryHeaderImage,
+} from "../lib/api.js";
 import { getSession, getSupabaseBrowserClient, signInWithGoogle, signOut } from "../lib/auth.js";
+
+const workspaceSections = [
+  { id: "gallery-setup", label: "Gallery Setup", caption: "Create or update gallery details" },
+  { id: "guest-library", label: "Reference Guests", caption: "Manage guest anchors" },
+  { id: "photo-sources", label: "Photo Sources", caption: "Add manual files or sync Drive" },
+  { id: "gallery-view", label: "Gallery View", caption: "Open, preview, and download images" },
+];
 
 const route = useRoute();
 const router = useRouter();
@@ -273,18 +454,14 @@ const error = ref("");
 const session = ref(null);
 const authReady = ref(false);
 const authBusy = ref(false);
-const debugState = reactive({
-  origin: typeof window !== "undefined" ? window.location.origin : "",
-  hash: typeof window !== "undefined" ? window.location.hash : "",
-  email: "",
-  provider: "",
-  lastEvent: "",
-  lastApiError: "",
-});
+const activeGalleryId = ref("");
+const activePhoto = ref(null);
 const saving = reactive({
   gallery: false,
   guest: false,
   photo: false,
+  headerImageGalleryId: "",
+  deleteGalleryId: "",
   connectDriveId: "",
   syncGalleryId: "",
   indexPhotoId: "",
@@ -311,7 +488,24 @@ const photoForm = reactive({
   guestIds: [],
 });
 
+const selectedGallery = computed(() => galleries.value.find((gallery) => gallery.id === activeGalleryId.value) || galleries.value[0] || null);
+const selectedGalleryGuests = computed(() =>
+  selectedGallery.value ? guests.value.filter((guest) => guest.galleryId === selectedGallery.value.id) : [],
+);
+const selectedGalleryPhotos = computed(() =>
+  selectedGallery.value
+    ? photos.value
+        .filter((photo) => photo.galleryId === selectedGallery.value.id)
+        .slice()
+        .sort((left, right) => {
+          const leftDate = left.capturedAt || left.createdAt || "";
+          const rightDate = right.capturedAt || right.createdAt || "";
+          return rightDate.localeCompare(leftDate);
+        })
+    : [],
+);
 const photoGuests = computed(() => guests.value.filter((guest) => guest.galleryId === photoForm.galleryId));
+
 let authSubscription;
 
 watch(
@@ -324,18 +518,35 @@ watch(
 );
 
 watch(
-  () => galleries.value,
-  (list) => {
-    if (!guestForm.galleryId && list.length) {
-      guestForm.galleryId = list[0].id;
+  () => galleries.value.map((gallery) => gallery.id),
+  (galleryIds) => {
+    if (!galleryIds.length) {
+      activeGalleryId.value = "";
+      return;
     }
 
-    if (!photoForm.galleryId && list.length) {
-      photoForm.galleryId = list[0].id;
+    if (!galleryIds.includes(activeGalleryId.value)) {
+      activeGalleryId.value = galleryIds[0];
     }
   },
   { immediate: true },
 );
+
+watch(selectedGallery, (gallery) => {
+  if (!gallery) {
+    guestForm.galleryId = "";
+    photoForm.galleryId = "";
+    return;
+  }
+
+  if (!guestForm.galleryId || !galleries.value.some((item) => item.id === guestForm.galleryId)) {
+    guestForm.galleryId = gallery.id;
+  }
+
+  if (!photoForm.galleryId || !galleries.value.some((item) => item.id === photoForm.galleryId)) {
+    photoForm.galleryId = gallery.id;
+  }
+});
 
 watch(
   () => photoForm.galleryId,
@@ -344,23 +555,33 @@ watch(
   },
 );
 
+watch(
+  () => photos.value,
+  (nextPhotos) => {
+    if (!activePhoto.value) {
+      return;
+    }
+
+    activePhoto.value = nextPhotos.find((photo) => photo.id === activePhoto.value.id) || null;
+  },
+);
+
 onMounted(initializeAuth);
+onMounted(() => window.addEventListener("keydown", handleKeydown));
+
 onBeforeUnmount(() => {
   authSubscription?.unsubscribe();
+  window.removeEventListener("keydown", handleKeydown);
 });
 
 async function initializeAuth() {
   try {
     const client = getSupabaseBrowserClient();
-    debugState.hash = window.location.hash;
     const listener = client.auth.onAuthStateChange((_event, nextSession) => {
-      debugState.lastEvent = _event;
-      debugState.hash = window.location.hash;
       void handleSessionChange(nextSession);
     });
     authSubscription = listener.data.subscription;
     session.value = await getSession();
-    syncDebugSession(session.value);
 
     if (session.value) {
       await loadSnapshot();
@@ -378,7 +599,6 @@ async function initializeAuth() {
 async function handleSessionChange(nextSession) {
   session.value = nextSession;
   error.value = "";
-  syncDebugSession(nextSession);
 
   if (!nextSession) {
     clearSnapshot();
@@ -392,19 +612,18 @@ function clearSnapshot() {
   galleries.value = [];
   guests.value = [];
   photos.value = [];
+  activePhoto.value = null;
 }
 
 async function loadSnapshot() {
   try {
     error.value = "";
-    debugState.lastApiError = "";
     const snapshot = await getAdminSnapshot();
     galleries.value = snapshot.galleries;
     guests.value = snapshot.guests;
     photos.value = snapshot.photos;
   } catch (loadError) {
     error.value = loadError.message;
-    debugState.lastApiError = loadError.message;
   }
 }
 
@@ -442,7 +661,6 @@ async function login() {
     await signInWithGoogle();
   } catch (loginError) {
     error.value = loginError.message;
-    debugState.lastApiError = loginError.message;
   } finally {
     authBusy.value = false;
   }
@@ -457,22 +675,16 @@ async function logout() {
     clearSnapshot();
   } catch (logoutError) {
     error.value = logoutError.message;
-    debugState.lastApiError = logoutError.message;
   } finally {
     authBusy.value = false;
   }
-}
-
-function syncDebugSession(nextSession) {
-  debugState.email = nextSession?.user?.email || "";
-  debugState.provider = nextSession?.user?.app_metadata?.provider || nextSession?.user?.app_metadata?.providers?.join(", ") || "";
 }
 
 async function submitGallery() {
   try {
     saving.gallery = true;
     error.value = "";
-    await createGallery({
+    const result = await createGallery({
       title: galleryForm.title,
       slug: slugify(galleryForm.slug),
       driveLink: galleryForm.driveLink,
@@ -486,6 +698,7 @@ async function submitGallery() {
       isPublic: true,
     });
     await loadSnapshot();
+    setActiveGallery(result.gallery.id);
   } catch (submitError) {
     error.value = submitError.message;
   } finally {
@@ -512,6 +725,7 @@ async function submitGuest() {
     formData.set("image", guestForm.image);
     await createGuest(formData);
     feedback.value = "Guest added.";
+    setActiveGallery(guestForm.galleryId);
     Object.assign(guestForm, {
       name: "",
       galleryId: guestForm.galleryId,
@@ -537,6 +751,7 @@ async function submitPhoto() {
       guestIds: photoForm.guestIds,
     });
     feedback.value = buildIndexingFeedback(result.indexing, "Photo mapped.");
+    setActiveGallery(photoForm.galleryId);
     Object.assign(photoForm, {
       galleryId: photoForm.galleryId,
       title: "",
@@ -571,9 +786,7 @@ async function syncDriveGallery(gallery) {
     saving.syncGalleryId = gallery.id;
     error.value = "";
     const result = await syncGalleryDrive(gallery.id);
-    const feedbackParts = [
-      `Synced ${result.syncedCount} image${result.syncedCount === 1 ? "" : "s"} from Google Drive.`,
-    ];
+    const feedbackParts = [`Synced ${result.syncedCount} image${result.syncedCount === 1 ? "" : "s"} from Google Drive.`];
 
     if (result.skippedCount) {
       const skippedPreview = (result.skippedFiles || [])
@@ -609,6 +822,61 @@ async function connectDrive(gallery) {
   }
 }
 
+async function removeGallery(gallery) {
+  const shouldDelete = window.confirm(`Delete "${gallery.title}"? This will remove its photos, guest references, face data, and synced assets.`);
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  try {
+    saving.deleteGalleryId = gallery.id;
+    error.value = "";
+    feedback.value = "";
+    const result = await deleteGallery(gallery.id);
+
+    if (activePhoto.value?.galleryId === gallery.id) {
+      activePhoto.value = null;
+    }
+
+    await loadSnapshot();
+    feedback.value = `Deleted ${result.gallery.title}.`;
+  } catch (deleteError) {
+    error.value = deleteError.message;
+  } finally {
+    saving.deleteGalleryId = "";
+  }
+}
+
+async function uploadHeaderImage(event, gallery) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+
+  if (!file) {
+    return;
+  }
+
+  try {
+    saving.headerImageGalleryId = gallery.id;
+    error.value = "";
+    const formData = new FormData();
+    formData.set("image", file);
+    await uploadGalleryHeaderImage(gallery.id, formData);
+    await loadSnapshot();
+    feedback.value = `Updated the header image for ${gallery.title}.`;
+  } catch (uploadError) {
+    error.value = uploadError.message;
+  } finally {
+    saving.headerImageGalleryId = "";
+  }
+}
+
+function setActiveGallery(galleryId) {
+  activeGalleryId.value = galleryId;
+  guestForm.galleryId = galleryId;
+  photoForm.galleryId = galleryId;
+}
+
 function galleryGuestCount(galleryId) {
   return guests.value.filter((guest) => guest.galleryId === galleryId).length;
 }
@@ -621,15 +889,29 @@ function galleryIndexedPhotoCount(galleryId) {
   return photos.value.filter((photo) => photo.galleryId === galleryId && photo.faceCount > 0).length;
 }
 
-function galleryPhotos(galleryId) {
-  return photos.value.filter((photo) => photo.galleryId === galleryId).slice(0, 6);
-}
-
 function photoGuestNames(photo) {
   return photo.guestIds
     .map((guestId) => guests.value.find((guest) => guest.id === guestId)?.name)
     .filter(Boolean)
     .join(", ");
+}
+
+function openPhoto(photo) {
+  activePhoto.value = photo;
+}
+
+function closePhoto() {
+  activePhoto.value = null;
+}
+
+function handleKeydown(event) {
+  if (event.key === "Escape") {
+    closePhoto();
+  }
+}
+
+function scrollToSection(sectionId) {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function personalUrl(slug) {
@@ -638,6 +920,10 @@ function personalUrl(slug) {
 
 function commonUrl(slug) {
   return `${window.location.origin}/g/${slug}/all`;
+}
+
+function driveDownloadUrl(photo) {
+  return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(photo.driveFileId)}`;
 }
 
 function formatDate(value) {

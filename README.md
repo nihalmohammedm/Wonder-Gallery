@@ -1,6 +1,6 @@
-# Wonder Gallery
+# PicDrop
 
-Wonder Gallery is now structured as a real application starter:
+PicDrop is now structured as a real application starter:
 
 - Vue 3 frontend for the admin panel and public gallery flow
 - Express backend for gallery data, Drive file parsing, selfie uploads, face-encoding sync, and selfie matching
