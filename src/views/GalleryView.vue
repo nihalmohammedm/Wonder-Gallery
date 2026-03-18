@@ -34,21 +34,39 @@
                   <RouterLink :to="`/g/${slug}`">
                     <Button label="Scan Again" severity="secondary" outlined icon="pi pi-refresh" />
                   </RouterLink>
+                  <Button
+                    v-if="profileCompleted && !profileFormVisible"
+                    label="Edit Profile"
+                    severity="secondary"
+                    outlined
+                    icon="pi pi-pencil"
+                    @click="openProfileEditor"
+                  />
                   <RouterLink v-if="profileSummaryVisible" :to="`/g/${slug}/all`">
                     <Button label="View All Photos" icon="pi pi-images" />
                   </RouterLink>
                 </div>
               </div>
 
-              <form v-if="!profileSummaryVisible" class="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto]" @submit.prevent="saveProfile">
+              <form v-if="profileFormVisible" class="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto]" @submit.prevent="saveProfile">
                 <InputText v-model.trim="profileForm.name" required placeholder="Full name" />
                 <InputText v-model.trim="profileForm.email" type="email" required placeholder="Email" />
                 <InputText v-model.trim="profileForm.phone" type="tel" placeholder="Phone" />
                 <InputText v-model.trim="profileForm.company" placeholder="Company / Team" />
-                <Button :label="savingProfile ? 'Saving...' : 'Create Profile'" :loading="savingProfile" type="submit" />
+                <div class="flex gap-3 xl:justify-end">
+                  <Button
+                    v-if="profileCompleted"
+                    label="Cancel"
+                    type="button"
+                    severity="secondary"
+                    outlined
+                    @click="closeProfileEditor"
+                  />
+                  <Button :label="savingProfile ? 'Saving...' : profileCompleted ? 'Save Changes' : 'Create Profile'" :loading="savingProfile" type="submit" />
+                </div>
               </form>
 
-              <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div v-else-if="profileSummaryVisible" class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div class="surface-muted p-4">
                   <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Name</p>
                   <p class="mt-2 text-sm font-semibold text-slate-900">{{ personalResult?.person?.name || profileForm.name }}</p>
@@ -253,7 +271,8 @@ const commonPinInput = ref("");
 const commonPinVerified = ref(false);
 const commonPinMessage = ref("");
 const commonPinMessageSeverity = ref("error");
-const profileRevealRequested = ref(false);
+const editingProfile = ref(true);
+const personalAccessGranted = ref(false);
 
 const profileForm = reactive({
   name: "",
@@ -263,14 +282,10 @@ const profileForm = reactive({
 });
 
 const isPersonalResults = computed(() => route.query.source === "personal" && Boolean(personalResult.value));
-const profileCreated = computed(() =>
-  Boolean(
-    personalResult.value?.profileCompleted
-      || (personalResult.value?.person?.id && (personalResult.value?.person?.email || profileForm.email.trim())),
-  ),
-);
-const profileSummaryVisible = computed(() => isPersonalResults.value && (profileCreated.value || profileRevealRequested.value));
-const canShowPhotos = computed(() => (isPersonalResults.value ? profileSummaryVisible.value : commonPinVerified.value));
+const profileCompleted = computed(() => Boolean(personalResult.value?.profileCompleted));
+const profileFormVisible = computed(() => isPersonalResults.value && (!personalAccessGranted.value || editingProfile.value));
+const profileSummaryVisible = computed(() => isPersonalResults.value && personalAccessGranted.value && profileCompleted.value && !editingProfile.value);
+const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
 const showCommonPinModal = computed(() => !isPersonalResults.value && gallery.value && !commonPinVerified.value);
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
 const currentPhotoIndex = computed(() => displayPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
@@ -303,8 +318,8 @@ const profileInitials = computed(() => {
   return parts.map((part) => part[0]?.toUpperCase() || "").join("") || "G";
 });
 const lockedOrEmptyMessage = computed(() => {
-  if (isPersonalResults.value && !profileCreated.value) {
-    return "Complete your profile to view your matched photos.";
+  if (isPersonalResults.value && !personalAccessGranted.value) {
+    return "Enter your details and submit the profile form to view your matched photos.";
   }
 
   if (!isPersonalResults.value && !commonPinVerified.value) {
@@ -327,7 +342,8 @@ async function loadGallery() {
 
     if (isPersonalResults.value) {
       hydrateProfileForm();
-      status.value = personalResult.value?.status || (profileCreated.value ? "Your matched photos are ready." : "Complete your profile to unlock your photos.");
+      resetPersonalAccess();
+      status.value = personalResult.value?.status || "Enter your details and submit the form to open your matched photos.";
       emptyMessage.value = personalResult.value?.status || "No confident match was found for your selfie.";
       return;
     }
@@ -363,7 +379,20 @@ function hydrateProfileForm() {
   profileForm.email = person?.email || "";
   profileForm.phone = person?.phone || "";
   profileForm.company = person?.company || "";
-  profileRevealRequested.value = Boolean(personalResult.value?.profileCompleted);
+}
+
+function resetPersonalAccess() {
+  editingProfile.value = true;
+  personalAccessGranted.value = false;
+}
+
+function openProfileEditor() {
+  editingProfile.value = true;
+}
+
+function closeProfileEditor() {
+  hydrateProfileForm();
+  editingProfile.value = false;
 }
 
 async function saveProfile() {
@@ -386,13 +415,15 @@ async function saveProfile() {
       company: profileForm.company.trim(),
     };
 
-    profileRevealRequested.value = true;
     personalResult.value = {
       ...personalResult.value,
       person: optimisticPerson,
+      profileCompleted: true,
       status: `Profile saved for ${optimisticPerson.name}. Your matched photos are ready.`,
     };
     persistPersonalResult();
+    personalAccessGranted.value = true;
+    editingProfile.value = false;
     status.value = `Profile saved for ${optimisticPerson.name}. Your matched photos are ready.`;
 
     savingProfile.value = true;
@@ -426,19 +457,21 @@ async function saveProfile() {
       ...personalResult.value,
       person: savedPerson,
       profileCompleted: true,
-      status: `Profile saved for ${response.person.name}. Your matched photos are ready.`,
+      status: `Profile saved for ${savedPerson.name}. Your matched photos are ready.`,
     };
     persistPersonalResult();
     hydrateProfileForm();
-    status.value = `Profile saved for ${response.person.name}. Your matched photos are ready.`;
+    editingProfile.value = false;
+    status.value = `Profile saved for ${savedPerson.name}. Your matched photos are ready.`;
   } catch (error) {
-    profileRevealRequested.value = false;
+    personalAccessGranted.value = false;
     personalResult.value = {
       ...personalResult.value,
       profileCompleted: false,
       status: error.message || "Unable to save the person profile.",
     };
     persistPersonalResult();
+    editingProfile.value = true;
     status.value = error.message || "Unable to save the person profile.";
   } finally {
     savingProfile.value = false;
