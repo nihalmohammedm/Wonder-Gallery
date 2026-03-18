@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureFaceEncodingApiAvailable, FaceEncodingApiError } from "./services/faceEncodingApi.js";
 import {
+  createStorageOptimizedImage,
   createDriveSyncImage,
   extractPhotoFaceEncodings,
   extractPrimaryFaceEncoding,
@@ -38,7 +39,7 @@ import {
   deleteGallery as deleteGalleryRecord,
   getGalleryDriveConnection,
   listDriveSyncStatesByGallery,
-  listGalleryPersonEncodings,
+  listAllPersonEncodings,
   listPersonFaceEncodings,
   listPhotoFacesByGallery,
   parseDriveId,
@@ -136,10 +137,15 @@ export function createApp() {
         return response.status(400).json({ error: "image is required" });
       }
 
+      const optimizedHeader = await createStorageOptimizedImage(request.file.buffer, request.file.mimetype, {
+        maxSize: 2400,
+        quality: 84,
+      });
+
       const gallery = await updateGalleryHeaderImage({
         galleryId: request.params.galleryId,
-        buffer: request.file.buffer,
-        mimeType: request.file.mimetype,
+        buffer: optimizedHeader.buffer,
+        mimeType: optimizedHeader.mimeType,
       });
 
       if (!gallery) {
@@ -430,8 +436,8 @@ export function createApp() {
       if (personId) {
         person = await findPersonById(personId);
 
-        if (!person || person.galleryId !== gallery.id) {
-          return response.status(404).json({ error: "Person not found for this gallery." });
+        if (!person) {
+          return response.status(404).json({ error: "Person not found." });
         }
 
         person = await updatePersonProfile({
@@ -870,8 +876,8 @@ async function resolveMatchPerson({ requestedPersonId, requestedPersonName, gall
   if (requestedPersonId) {
     const person = await findPersonById(requestedPersonId);
 
-    if (!person || person.galleryId !== galleryId) {
-      throw new Error("Person not found for this gallery.");
+    if (!person) {
+      throw new Error("Person not found.");
     }
 
     return person;
@@ -917,8 +923,8 @@ async function detectExistingPersonForBuffer({ galleryId, buffer, mimeType }) {
 }
 
 async function detectExistingPersonForEncoding({ galleryId, encoding }) {
-  const galleryPersonEncodings = await listGalleryPersonEncodings(galleryId);
-  const personMatch = findBestPersonMatch(encoding, galleryPersonEncodings);
+  const allPersonEncodings = await listAllPersonEncodings();
+  const personMatch = findBestPersonMatch(encoding, allPersonEncodings);
 
   if (!personMatch?.personId) {
     return null;

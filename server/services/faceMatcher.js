@@ -12,6 +12,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_FACE_DISTANCE_THRESHOLD = 0.51;
 const PREVIEW_MAX_SIZE = 1600;
 const PREVIEW_JPEG_QUALITY = 82;
+const REFERENCE_MAX_SIZE = 1280;
+const REFERENCE_JPEG_QUALITY = 80;
 
 export async function extractPrimaryFaceEncoding(buffer, mimeType, options = {}) {
   const normalizedMimeType = normalizeMimeType(mimeType);
@@ -54,15 +56,10 @@ export async function extractPhotoFaceEncodings(buffer, mimeType) {
 }
 
 export async function createGalleryPreview(buffer, mimeType) {
-  const normalizedMimeType = normalizeMimeType(mimeType);
-  const safeBuffer = await normalizeImageBuffer(buffer, normalizedMimeType);
-  const previewBuffer = await renderGalleryPreview(safeBuffer, normalizedMimeType);
-
-  return {
-    buffer: previewBuffer,
-    mimeType: "image/jpeg",
-    extension: "jpg",
-  };
+  return createStorageOptimizedImage(buffer, mimeType, {
+    maxSize: PREVIEW_MAX_SIZE,
+    quality: PREVIEW_JPEG_QUALITY,
+  });
 }
 
 export async function createDriveSyncImage(buffer, mimeType) {
@@ -75,6 +72,18 @@ export async function createDriveSyncImage(buffer, mimeType) {
   }
 
   return createGalleryPreview(buffer, mimeType);
+}
+
+export async function createStorageOptimizedImage(buffer, mimeType, options = {}) {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  const safeBuffer = await normalizeImageBuffer(buffer, normalizedMimeType);
+  const optimizedBuffer = await renderOptimizedJpeg(safeBuffer, normalizedMimeType, options.maxSize || PREVIEW_MAX_SIZE, options.quality || PREVIEW_JPEG_QUALITY);
+
+  return {
+    buffer: optimizedBuffer,
+    mimeType: "image/jpeg",
+    extension: "jpg",
+  };
 }
 
 export async function sanitizeDriveImage(buffer, mimeType) {
@@ -280,15 +289,15 @@ function shouldPreemptivelyTranscodeJpeg(mimeType, buffer) {
   return process.platform === "darwin" && (lowerMimeType === "image/jpeg" || lowerMimeType === "image/jpg" || looksLikeJpeg(buffer));
 }
 
-async function renderGalleryPreview(buffer, mimeType) {
+async function renderOptimizedJpeg(buffer, mimeType, maxSize, quality) {
   try {
     return await sharp(buffer)
-      .resize(PREVIEW_MAX_SIZE, PREVIEW_MAX_SIZE, {
+      .resize(maxSize, maxSize, {
         fit: "inside",
         withoutEnlargement: true,
       })
       .jpeg({
-        quality: PREVIEW_JPEG_QUALITY,
+        quality,
         mozjpeg: true,
       })
       .toBuffer();
@@ -299,12 +308,12 @@ async function renderGalleryPreview(buffer, mimeType) {
 
     const transcodedBuffer = await transcodeImageWithSips(buffer, inferExtension(mimeType), "jpeg");
     return sharp(transcodedBuffer)
-      .resize(PREVIEW_MAX_SIZE, PREVIEW_MAX_SIZE, {
+      .resize(maxSize, maxSize, {
         fit: "inside",
         withoutEnlargement: true,
       })
       .jpeg({
-        quality: PREVIEW_JPEG_QUALITY,
+        quality,
         mozjpeg: true,
       })
       .toBuffer();
@@ -451,6 +460,9 @@ function inferExtension(mimeType) {
 }
 
 async function persistReferenceImage(buffer, mimeType) {
-  const extension = normalizeMimeType(mimeType) === "image/png" ? "png" : "jpg";
-  return saveUpload(`person_${crypto.randomUUID()}.${extension}`, buffer);
+  const optimized = await createStorageOptimizedImage(buffer, mimeType, {
+    maxSize: REFERENCE_MAX_SIZE,
+    quality: REFERENCE_JPEG_QUALITY,
+  });
+  return saveUpload(`person_${crypto.randomUUID()}.${optimized.extension}`, optimized.buffer);
 }

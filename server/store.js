@@ -371,6 +371,15 @@ export async function listGalleryPersonEncodings(galleryId) {
   return (result.data || []).map(toPersonFaceEncodingRecord);
 }
 
+export async function listAllPersonEncodings() {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("person_face_encodings")
+    .select("*");
+  throwIfError(result.error);
+  return (result.data || []).map(toPersonFaceEncodingRecord);
+}
+
 export async function addPhoto(input) {
   const supabase = getSupabaseAdmin();
   const insertResult = await supabase

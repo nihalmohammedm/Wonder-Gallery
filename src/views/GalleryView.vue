@@ -282,7 +282,9 @@ const profileForm = reactive({
 });
 
 const isPersonalResults = computed(() => route.query.source === "personal" && Boolean(personalResult.value));
-const profileCompleted = computed(() => Boolean(personalResult.value?.profileCompleted));
+const profileCompleted = computed(() =>
+  Boolean(personalResult.value?.profileCompleted || personalResult.value?.person?.email),
+);
 const profileFormVisible = computed(() => isPersonalResults.value && (!personalAccessGranted.value || editingProfile.value));
 const profileSummaryVisible = computed(() => isPersonalResults.value && personalAccessGranted.value && profileCompleted.value && !editingProfile.value);
 const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
@@ -343,7 +345,9 @@ async function loadGallery() {
     if (isPersonalResults.value) {
       hydrateProfileForm();
       resetPersonalAccess();
-      status.value = personalResult.value?.status || "Enter your details and submit the form to open your matched photos.";
+      status.value = personalResult.value?.status || (profileCompleted.value
+        ? "Your matched photos are ready."
+        : "Enter your details and submit the form to open your matched photos.");
       emptyMessage.value = personalResult.value?.status || "No confident match was found for your selfie.";
       return;
     }
@@ -382,8 +386,8 @@ function hydrateProfileForm() {
 }
 
 function resetPersonalAccess() {
-  editingProfile.value = true;
-  personalAccessGranted.value = false;
+  editingProfile.value = !profileCompleted.value;
+  personalAccessGranted.value = profileCompleted.value;
 }
 
 function openProfileEditor() {
