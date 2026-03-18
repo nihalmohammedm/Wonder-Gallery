@@ -77,6 +77,7 @@ const props = defineProps({
 const router = useRouter();
 const gallery = ref(null);
 const previewUrl = ref("");
+const selfieDataUrl = ref("");
 const status = ref("Loading gallery...");
 const videoRef = ref(null);
 const cameraMode = ref("idle");
@@ -109,6 +110,7 @@ async function openScanModal() {
   scanModalOpen.value = true;
   revokePreviewUrl();
   previewUrl.value = "";
+  selfieDataUrl.value = "";
   cameraMode.value = "idle";
   await startCamera();
 }
@@ -122,6 +124,7 @@ function closeScanModal() {
   stopCamera();
   revokePreviewUrl();
   previewUrl.value = "";
+  selfieDataUrl.value = "";
   cameraMode.value = "idle";
 }
 
@@ -167,9 +170,16 @@ async function captureSelfie() {
   stopCamera();
   cameraMode.value = "idle";
   updatePreview(blob);
+  selfieDataUrl.value = await blobToDataUrl(blob);
 
   const formData = new FormData();
   formData.set("selfie", new File([blob], "selfie.jpg", { type: "image/jpeg" }));
+  const existingProfile = readStoredMatch();
+
+  if (existingProfile?.person?.id) {
+    formData.set("personId", existingProfile.person.id);
+  }
+
   await submitMatch(formData);
 }
 
@@ -204,10 +214,13 @@ async function submitMatch(formData) {
 }
 
 function persistMatchPayload(response) {
+  const existing = readStoredMatch();
   const payload = {
     gallery: gallery.value,
     match: response.match,
     diagnostics: response.diagnostics || null,
+    person: response.person || existing?.person || null,
+    selfieDataUrl: selfieDataUrl.value || existing?.selfieDataUrl || "",
     status: response.match
       ? `${response.match.photoCount} photo${response.match.photoCount === 1 ? "" : "s"} matched your selfie.`
       : buildNoMatchMessage(response),
@@ -275,5 +288,23 @@ function bannerStyle(galleryRecord) {
 
 function matchStorageKey(slug) {
   return `${PERSONAL_MATCH_STORAGE_PREFIX}:${slug}`;
+}
+
+function readStoredMatch() {
+  try {
+    const stored = sessionStorage.getItem(matchStorageKey(props.slug));
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Unable to read the captured selfie."));
+    reader.readAsDataURL(blob);
+  });
 }
 </script>

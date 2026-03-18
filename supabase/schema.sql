@@ -35,6 +35,9 @@ create table if not exists public.persons (
   id uuid primary key default gen_random_uuid(),
   gallery_id uuid not null references public.galleries(id) on delete cascade,
   name text not null,
+  email text,
+  phone text,
+  company text,
   reference_image_path text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -101,6 +104,9 @@ alter table public.photos add column if not exists image_width integer;
 alter table public.photos add column if not exists image_height integer;
 alter table public.photos add column if not exists face_index jsonb;
 alter table public.photos add column if not exists source text not null default 'manual';
+alter table public.persons add column if not exists email text;
+alter table public.persons add column if not exists phone text;
+alter table public.persons add column if not exists company text;
 
 create unique index if not exists photos_gallery_drive_file_id_idx on public.photos(gallery_id, drive_file_id);
 

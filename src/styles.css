@@ -614,6 +614,89 @@ select[multiple] {
   flex-wrap: wrap;
 }
 
+.gallery-shell {
+  width: min(1120px, calc(100% - 2rem));
+}
+
+.person-profile-card,
+.gallery-grid-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.person-profile-top,
+.person-profile-identity {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.person-profile-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(128, 208, 255, 0.2), rgba(18, 63, 138, 0.12));
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.person-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-profile-identity h2 {
+  margin: 0;
+  letter-spacing: -0.05em;
+}
+
+.person-profile-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.gallery-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.9rem;
+}
+
+.gallery-result-card {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 10px;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease;
+}
+
+.gallery-result-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+}
+
+.gallery-result-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: linear-gradient(135deg, rgba(128, 208, 255, 0.28), rgba(18, 63, 138, 0.1));
+}
+
 .admin-shell {
   width: min(1440px, calc(100% - 2rem));
   display: grid;
@@ -920,6 +1003,10 @@ select[multiple] {
   .personal-banner {
     min-height: 220px;
   }
+
+  .person-profile-form {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -944,5 +1031,9 @@ select[multiple] {
 
   .scan-modal-actions {
     justify-content: stretch;
+  }
+
+  .person-profile-form {
+    grid-template-columns: 1fr;
   }
 }

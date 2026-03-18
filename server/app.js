@@ -32,6 +32,7 @@ import {
   findGalleryBySlug,
   findPhotoById,
   findPersonById,
+  updatePersonProfile,
   deleteGallery as deleteGalleryRecord,
   getGalleryDriveConnection,
   listDriveSyncStatesByGallery,
@@ -379,6 +380,68 @@ export function createApp() {
 
       const photos = store.photos.filter((photo) => photo.galleryId === gallery.id);
       response.json({ gallery, photos });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/public/galleries/:slug/person-profile", upload.single("selfie"), async (request, response, next) => {
+    try {
+      const store = await readStore();
+      const gallery = findGalleryBySlug(store, request.params.slug);
+
+      if (!gallery || !gallery.isPublic) {
+        return response.status(404).json({ error: "Gallery not found or public access is disabled" });
+      }
+
+      const personId = normalizeTextField(request.body?.personId);
+      const name = normalizeTextField(request.body?.name);
+      const email = normalizeTextField(request.body?.email);
+      const phone = normalizeTextField(request.body?.phone);
+      const company = normalizeTextField(request.body?.company);
+
+      if (!name) {
+        return response.status(400).json({ error: "name is required" });
+      }
+
+      let person;
+
+      if (personId) {
+        person = await findPersonById(personId);
+
+        if (!person || person.galleryId !== gallery.id) {
+          return response.status(404).json({ error: "Person not found for this gallery." });
+        }
+
+        person = await updatePersonProfile({
+          personId: person.id,
+          name,
+          email,
+          phone,
+          company,
+        });
+      } else {
+        person = await addPerson({
+          galleryId: gallery.id,
+          name,
+          email,
+          phone,
+          company,
+        });
+      }
+
+      if (request.file) {
+        await saveSelfieEncodingForPerson({
+          person,
+          galleryId: gallery.id,
+          buffer: request.file.buffer,
+          mimeType: request.file.mimetype,
+          source: "public_profile",
+        });
+      }
+
+      const updatedPerson = await findPersonById(person.id);
+      response.status(personId ? 200 : 201).json({ person: updatedPerson });
     } catch (error) {
       next(error);
     }

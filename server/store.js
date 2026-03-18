@@ -244,6 +244,9 @@ export async function addPerson(input) {
     .insert({
       gallery_id: input.galleryId,
       name: input.name,
+      email: input.email || null,
+      phone: input.phone || null,
+      company: input.company || null,
       reference_image_path: input.referenceImagePath || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -252,6 +255,26 @@ export async function addPerson(input) {
     .single();
   throwIfError(insertResult.error);
   return toPersonRecord(insertResult.data, 0);
+}
+
+export async function updatePersonProfile(input) {
+  const supabase = getSupabaseAdmin();
+  const updateResult = await supabase
+    .from("persons")
+    .update({
+      name: input.name,
+      email: input.email || null,
+      phone: input.phone || null,
+      company: input.company || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.personId)
+    .select("*")
+    .single();
+  throwIfError(updateResult.error);
+
+  const encodingCount = await countPersonEncodings(updateResult.data.id);
+  return toPersonRecord(updateResult.data, encodingCount);
 }
 
 export async function findPersonById(personId) {
@@ -521,6 +544,9 @@ async function toPersonRecord(row, selfieCount) {
     id: row.id,
     galleryId: row.gallery_id,
     name: row.name,
+    email: row.email || "",
+    phone: row.phone || "",
+    company: row.company || "",
     referenceImagePath: row.reference_image_path,
     referenceImageUrl: await createSignedImageUrl(row.reference_image_path),
     selfieCount,

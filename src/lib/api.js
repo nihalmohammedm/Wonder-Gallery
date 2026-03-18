@@ -157,6 +157,13 @@ export function getPublicGalleryPhotos(slug) {
   return request(`/public/galleries/${slug}/photos`);
 }
 
+export function savePublicPersonProfile(slug, formData) {
+  return request(`/public/galleries/${slug}/person-profile`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
 export function matchSelfie(slug, formData) {
   return request(`/public/galleries/${slug}/match`, {
     method: "POST",

@@ -1,92 +1,148 @@
 <template>
-  <main class="shell">
-    <section class="gallery-hero" :style="heroStyle(gallery)">
-      <div class="gallery-hero-top">
-        <div class="gallery-hero-copy">
-          <p class="gallery-kicker">{{ isPersonalResults ? "Personal Match" : "Common Link" }}</p>
-          <h1>{{ gallery?.title || "Gallery" }}</h1>
-          <p class="gallery-caption">
-            {{
-              isPersonalResults
-                ? "These are the photos matched from your selfie scan. Switch back to the common gallery if you want the full event wall."
-                : "A clean gallery wall for the full event archive. Open the personal link if you want the selfie-based matching flow instead."
-            }}
-          </p>
-        </div>
-        <div class="gallery-actions">
-          <RouterLink class="button button-secondary" to="/">Overview</RouterLink>
-          <RouterLink v-if="!isPersonalResults" class="button button-primary" :to="`/g/${slug}`">Personal Link</RouterLink>
-          <RouterLink v-else class="button button-secondary" :to="`/g/${slug}`">Scan Again</RouterLink>
-          <RouterLink v-if="isPersonalResults" class="button button-primary" :to="`/g/${slug}/all`">View All Photos</RouterLink>
-        </div>
-      </div>
+  <main class="shell gallery-shell">
+    <template v-if="isPersonalResults">
+      <section class="personal-stage">
+        <section class="personal-banner" :class="{ 'is-fallback': !gallery?.headerImageUrl }" :style="bannerStyle(gallery)">
+          <div v-if="!gallery?.headerImageUrl" class="personal-banner-fallback">
+            <h1>{{ gallery?.title || "Event Name" }}</h1>
+          </div>
+        </section>
 
-      <div class="gallery-stat-grid">
-        <article class="gallery-stat">
-          <strong>{{ displayPhotos.length }}</strong>
-          <span>{{ isPersonalResults ? "Matched Photos" : "Total Photos" }}</span>
-        </article>
-        <article class="gallery-stat">
-          <strong>{{ photoYears }}</strong>
-          <span>Captured Year{{ photoYears === 1 ? "" : "s" }}</span>
-        </article>
-        <article class="gallery-stat">
-          <strong>{{ latestDate }}</strong>
-          <span>Latest Capture</span>
-        </article>
-      </div>
-    </section>
+        <section class="panel person-profile-card">
+          <div class="person-profile-top">
+            <div class="person-profile-identity">
+              <div class="person-profile-avatar">
+                <img v-if="profilePhotoUrl" :src="profilePhotoUrl" :alt="profileForm.name || 'Profile photo'" />
+                <span v-else>{{ profileInitials }}</span>
+              </div>
+              <div>
+                <h2>{{ profileForm.name || "Add Name" }}</h2>
+                <p class="helper-copy">This profile photo is the scanned reference image so admins can review who scanned into the gallery.</p>
+              </div>
+            </div>
+            <div class="gallery-actions">
+              <RouterLink class="button button-secondary" :to="`/g/${slug}`">Scan Again</RouterLink>
+              <RouterLink class="button button-primary" :to="`/g/${slug}/all`">View All Photos</RouterLink>
+            </div>
+          </div>
+
+          <form class="person-profile-form" @submit.prevent="saveProfile">
+            <input v-model.trim="profileForm.name" type="text" required placeholder="Full name" />
+            <input v-model.trim="profileForm.email" type="email" placeholder="Email" />
+            <input v-model.trim="profileForm.phone" type="tel" placeholder="Phone" />
+            <input v-model.trim="profileForm.company" type="text" placeholder="Company / Team" />
+            <button class="button button-primary" type="submit" :disabled="savingProfile || !gallery">
+              {{ savingProfile ? "Updating..." : personalResult?.person?.id ? "Update" : "Create Profile" }}
+            </button>
+          </form>
+        </section>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="gallery-hero" :style="heroStyle(gallery)">
+        <div class="gallery-hero-top">
+          <div class="gallery-hero-copy">
+            <p class="gallery-kicker">Common Link</p>
+            <h1>{{ gallery?.title || "Gallery" }}</h1>
+            <p class="gallery-caption">
+              A clean gallery wall for the full event archive. Open the personal link if you want the selfie-based matching flow instead.
+            </p>
+          </div>
+          <div class="gallery-actions">
+            <RouterLink class="button button-secondary" to="/">Overview</RouterLink>
+            <RouterLink class="button button-primary" :to="`/g/${slug}`">Personal Link</RouterLink>
+          </div>
+        </div>
+
+        <div class="gallery-stat-grid">
+          <article class="gallery-stat">
+            <strong>{{ displayPhotos.length }}</strong>
+            <span>Total Photos</span>
+          </article>
+          <article class="gallery-stat">
+            <strong>{{ photoYears }}</strong>
+            <span>Captured Year{{ photoYears === 1 ? "" : "s" }}</span>
+          </article>
+          <article class="gallery-stat">
+            <strong>{{ latestDate }}</strong>
+            <span>Latest Capture</span>
+          </article>
+        </div>
+      </section>
+    </template>
 
     <section class="gallery-strip">
       <div class="status-card">{{ status }}</div>
     </section>
 
-    <section class="gallery-board">
-      <aside class="gallery-callout">
-        <p class="gallery-kicker">{{ isPersonalResults ? "Matched Set" : "Browse" }}</p>
-        <h2>{{ isPersonalResults ? "Your Photo Collection" : "Event Collection" }}</h2>
-        <p>
-          {{
-            isPersonalResults
-              ? personalSummary
-              : "Every card opens the original Drive item. The gallery surface uses the synced backend copy when available and falls back to the Drive thumbnail otherwise."
-          }}
-        </p>
-        <div class="gallery-pill-row">
-          <span class="gallery-pill">{{ isPersonalResults ? "Personal mode" : "Common mode" }}</span>
-          <span class="gallery-pill">{{ displayPhotos.length }} image{{ displayPhotos.length === 1 ? "" : "s" }}</span>
+    <section class="panel gallery-grid-panel">
+      <div class="gallery-panel-title">
+        <div>
+          <p class="gallery-kicker">{{ isPersonalResults ? "Matched Gallery" : "Photo Wall" }}</p>
+          <h2>{{ isPersonalResults ? "Your Photos" : "All Images" }}</h2>
         </div>
-      </aside>
+        <div class="summary-metrics">
+          <span class="metric">{{ displayPhotos.length }} image{{ displayPhotos.length === 1 ? "" : "s" }}</span>
+          <span v-if="isPersonalResults && personalResult?.diagnostics?.bestScore != null" class="metric">
+            Best score {{ personalResult.diagnostics.bestScore }}
+          </span>
+        </div>
+      </div>
 
-      <section class="panel">
-        <div class="gallery-panel-title">
-          <div>
-            <p class="gallery-kicker">{{ isPersonalResults ? "Matches" : "Photo Wall" }}</p>
-            <h2>{{ isPersonalResults ? "Matched Images" : "All Images" }}</h2>
-          </div>
-        </div>
-
-        <div v-if="displayPhotos.length" class="gallery-grid">
-          <article v-for="photo in displayPhotos" :key="photo.id" class="photo-card">
-            <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
-            <div>
-              <h3>{{ photo.title }}</h3>
-              <p>{{ formatDate(photo.capturedAt) }}</p>
-              <p v-if="photo.matchScore != null">Match score: {{ photo.matchScore }} ({{ photo.matchConfidence }} confidence)</p>
-              <p><a :href="photo.driveLink" target="_blank" rel="noreferrer">Open original in Drive</a></p>
-            </div>
-          </article>
-        </div>
-        <div v-else class="empty-state gallery-results-empty">{{ emptyMessage }}</div>
-      </section>
+      <div v-if="displayPhotos.length" class="gallery-results-grid">
+        <button
+          v-for="photo in displayPhotos"
+          :key="photo.id"
+          class="gallery-result-card"
+          type="button"
+          @click="openPhoto(photo)"
+        >
+          <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
+        </button>
+      </div>
+      <div v-else class="empty-state gallery-results-empty">{{ emptyMessage }}</div>
     </section>
+
+    <Teleport to="body">
+      <div v-if="activePhoto" class="lightbox" @click.self="closePhoto">
+        <article class="lightbox-panel">
+          <button class="lightbox-close" type="button" @click="closePhoto" aria-label="Close image preview">Close</button>
+          <div class="lightbox-stage">
+            <img :src="activePhoto.storageImageUrl || activePhoto.thumbnailUrl" :alt="activePhoto.title" />
+          </div>
+          <div class="lightbox-details">
+            <div>
+              <p class="eyebrow">Photo Preview</p>
+              <h2>{{ activePhoto.title }}</h2>
+            </div>
+            <p class="helper-copy">{{ formatDate(activePhoto.capturedAt) }}</p>
+            <p v-if="activePhoto.matchScore != null" class="helper-copy">
+              Match score: {{ activePhoto.matchScore }} ({{ activePhoto.matchConfidence }} confidence)
+            </p>
+            <div class="button-row">
+              <button class="button button-secondary" type="button" @click="closePhoto">Cancel</button>
+              <a
+                class="button button-primary"
+                :href="driveDownloadUrl(activePhoto)"
+                target="_blank"
+                rel="noreferrer"
+                download
+              >
+                Download Full Image
+              </a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
-import { getPublicGalleryPhotos } from "../lib/api.js";
+import { getPublicGalleryPhotos, savePublicPersonProfile } from "../lib/api.js";
 
 const PERSONAL_MATCH_STORAGE_PREFIX = "picdrop-personal-match";
 
@@ -103,23 +159,18 @@ const photos = ref([]);
 const status = ref("Loading gallery...");
 const emptyMessage = ref("No gallery images are available yet.");
 const personalResult = ref(null);
+const activePhoto = ref(null);
+const savingProfile = ref(false);
+
+const profileForm = reactive({
+  name: "",
+  email: "",
+  phone: "",
+  company: "",
+});
 
 const isPersonalResults = computed(() => route.query.source === "personal" && Boolean(personalResult.value));
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
-const personalSummary = computed(() => {
-  if (!isPersonalResults.value) {
-    return "";
-  }
-
-  if (!personalResult.value?.match) {
-    return personalResult.value?.status || "No confident match was found for your selfie.";
-  }
-
-  const diagnostics = personalResult.value.diagnostics || {};
-  const bestScore = diagnostics.bestScore ?? personalResult.value.match.bestScore ?? "n/a";
-  return `${personalResult.value.match.photoCount} photos matched your selfie. Best score: ${bestScore}.`;
-});
-
 const photoYears = computed(() => {
   const years = new Set(
     displayPhotos.value
@@ -128,13 +179,20 @@ const photoYears = computed(() => {
   );
   return years.size || 0;
 });
-
 const latestDate = computed(() => {
   const datedPhotos = displayPhotos.value
     .filter((photo) => photo.capturedAt)
     .slice()
     .sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
   return datedPhotos[0] ? formatDate(datedPhotos[0].capturedAt) : "No date";
+});
+const profilePhotoUrl = computed(() => personalResult.value?.person?.referenceImageUrl || personalResult.value?.selfieDataUrl || "");
+const profileInitials = computed(() => {
+  const parts = (profileForm.name || "Guest")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() || "").join("") || "G";
 });
 
 onMounted(loadGallery);
@@ -148,6 +206,7 @@ async function loadGallery() {
     photos.value = response.photos;
 
     if (isPersonalResults.value) {
+      hydrateProfileForm();
       status.value = personalResult.value?.status || "Your matched photos are ready.";
       emptyMessage.value = personalResult.value?.status || "No confident match was found for your selfie.";
       return;
@@ -178,6 +237,68 @@ function restorePersonalMatch() {
   }
 }
 
+function hydrateProfileForm() {
+  const person = personalResult.value?.person;
+  profileForm.name = person?.name || "";
+  profileForm.email = person?.email || "";
+  profileForm.phone = person?.phone || "";
+  profileForm.company = person?.company || "";
+}
+
+async function saveProfile() {
+  if (!gallery.value || !profileForm.name.trim()) {
+    status.value = "Name is required.";
+    return;
+  }
+
+  try {
+    savingProfile.value = true;
+    status.value = "Saving person profile...";
+    const formData = new FormData();
+
+    if (personalResult.value?.person?.id) {
+      formData.set("personId", personalResult.value.person.id);
+    }
+
+    formData.set("name", profileForm.name.trim());
+    formData.set("email", profileForm.email.trim());
+    formData.set("phone", profileForm.phone.trim());
+    formData.set("company", profileForm.company.trim());
+
+    if (!personalResult.value?.person?.id && personalResult.value?.selfieDataUrl) {
+      formData.set("selfie", dataUrlToFile(personalResult.value.selfieDataUrl, "profile-selfie.jpg"));
+    }
+
+    const response = await savePublicPersonProfile(props.slug, formData);
+    personalResult.value = {
+      ...personalResult.value,
+      person: response.person,
+      status: `Profile saved for ${response.person.name}.`,
+    };
+    sessionStorage.setItem(matchStorageKey(props.slug), JSON.stringify(personalResult.value));
+    hydrateProfileForm();
+    status.value = `Profile saved for ${response.person.name}. Admin can now see this scanned person in the gallery dashboard.`;
+  } catch (error) {
+    status.value = error.message || "Unable to save the person profile.";
+  } finally {
+    savingProfile.value = false;
+  }
+}
+
+function openPhoto(photo) {
+  activePhoto.value = photo;
+}
+
+function closePhoto() {
+  activePhoto.value = null;
+}
+
+function driveDownloadUrl(photo) {
+  return photo.driveFileId
+    ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(photo.driveFileId)}`
+    : photo.driveLink;
+}
+
 function formatDate(value) {
   if (!value) {
     return "Date not set";
@@ -202,7 +323,33 @@ function heroStyle(galleryRecord) {
   };
 }
 
+function bannerStyle(galleryRecord) {
+  if (!galleryRecord?.headerImageUrl) {
+    return {};
+  }
+
+  return {
+    backgroundImage: `url("${galleryRecord.headerImageUrl}")`,
+    backgroundPosition: "center",
+    backgroundSize: "cover",
+  };
+}
+
 function matchStorageKey(slug) {
   return `${PERSONAL_MATCH_STORAGE_PREFIX}:${slug}`;
+}
+
+function dataUrlToFile(dataUrl, fileName) {
+  const [metadata, content] = dataUrl.split(",");
+  const mimeMatch = metadata.match(/data:(.*?);base64/);
+  const mimeType = mimeMatch?.[1] || "image/jpeg";
+  const binary = atob(content);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new File([bytes], fileName, { type: mimeType });
 }
 </script>
