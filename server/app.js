@@ -107,17 +107,20 @@ export function createApp() {
 
   app.post("/api/admin/galleries", async (request, response, next) => {
     try {
-      const { title, slug, driveLink, isPublic } = request.body;
+      const { title, slug, driveLink, driveLinks, isPublic } = request.body;
+      const normalizedDriveLinks = normalizeDriveLinks(driveLinks?.length ? driveLinks : driveLink);
 
-      if (!title || !slug || !driveLink) {
-        return response.status(400).json({ error: "title, slug, and driveLink are required" });
+      if (!title || !slug || !normalizedDriveLinks.length) {
+        return response.status(400).json({ error: "title, slug, and at least one driveLink are required" });
       }
 
       const gallery = await upsertGallery({
         title,
         slug,
-        driveLink,
-        driveFolderId: parseDriveId(driveLink),
+        driveLink: normalizedDriveLinks[0],
+        driveFolderId: parseDriveId(normalizedDriveLinks[0]),
+        driveLinks: normalizedDriveLinks,
+        driveFolderIds: normalizedDriveLinks.map((link) => parseDriveId(link)).filter(Boolean),
         isPublic: Boolean(isPublic),
       });
 
@@ -657,7 +660,7 @@ export async function syncAllConnectedGalleries() {
 
   try {
     const store = await readStore();
-    const galleries = store.galleries.filter((gallery) => gallery.driveFolderId && gallery.hasDriveConnection);
+    const galleries = store.galleries.filter((gallery) => (gallery.driveFolderIds?.length || gallery.driveFolderId) && gallery.hasDriveConnection);
     const results = [];
 
     for (const gallery of galleries) {
@@ -684,7 +687,9 @@ export async function syncAllConnectedGalleries() {
 }
 
 async function syncGalleryDrive(gallery) {
-  if (!gallery.driveFolderId) {
+  const folderIds = gallery.driveFolderIds?.length ? gallery.driveFolderIds : [gallery.driveFolderId].filter(Boolean);
+
+  if (!folderIds.length) {
     throw new Error("Gallery is missing a Google Drive folder ID");
   }
 
@@ -696,10 +701,11 @@ async function syncGalleryDrive(gallery) {
 
   await ensureFaceEncodingApiAvailable();
 
-  const [driveFiles, existingPhotos] = await Promise.all([
-    listDriveFolderImages(gallery.driveFolderId, driveConnection.refreshToken),
+  const [driveFilesByFolder, existingPhotos] = await Promise.all([
+    Promise.all(folderIds.map((folderId) => listDriveFolderImages(folderId, driveConnection.refreshToken))),
     listDriveSyncStatesByGallery(gallery.id),
   ]);
+  const driveFiles = driveFilesByFolder.flat();
   const existingByDriveFileId = new Map(existingPhotos.map((photo) => [photo.driveFileId, photo]));
   const outcomes = await mapWithConcurrency(
     driveFiles,
@@ -951,6 +957,21 @@ function normalizeTextField(value) {
   }
 
   return value.trim();
+}
+
+function normalizeDriveLinks(input) {
+  if (Array.isArray(input)) {
+    return input.map((value) => normalizeTextField(value)).filter(Boolean);
+  }
+
+  if (typeof input === "string") {
+    return input
+      .split(/\r?\n|,/)
+      .map((value) => normalizeTextField(value))
+      .filter(Boolean);
+  }
+
+  return [];
 }
 
 function buildDraftPersonName() {

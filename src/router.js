@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from "vue-router";
-import HomeView from "./views/HomeView.vue";
 import AdminView from "./views/AdminView.vue";
 import GuestView from "./views/GuestView.vue";
 import GalleryView from "./views/GalleryView.vue";
@@ -9,13 +8,19 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      name: "home",
-      component: HomeView,
+      name: "admin-home",
+      component: AdminView,
     },
     {
       path: "/admin",
       name: "admin",
       component: AdminView,
+    },
+    {
+      path: "/admin/galleries/:galleryId",
+      name: "admin-gallery",
+      component: AdminView,
+      props: true,
     },
     {
       path: "/g/:slug",

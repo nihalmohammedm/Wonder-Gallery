@@ -37,13 +37,13 @@ textarea {
 }
 
 .p-dialog {
-  border-radius: 1.5rem;
+  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   overflow: hidden;
 }
 
 .p-card {
-  border-radius: 1.5rem;
+  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.22);
 }
 
@@ -58,11 +58,11 @@ textarea {
 }
 
 .surface-panel {
-  @apply rounded-[28px] border border-slate-200/70 bg-white/90 backdrop-blur;
+  @apply rounded-[10px] border border-slate-200/70 bg-white/90 backdrop-blur;
 }
 
 .surface-muted {
-  @apply rounded-[24px] border border-slate-200/70 bg-slate-50/80;
+  @apply rounded-[10px] border border-slate-200/70 bg-slate-50/80;
 }
 
 .eyebrow {
@@ -90,7 +90,7 @@ textarea {
 }
 
 .gallery-grid button {
-  @apply overflow-hidden rounded-2xl border border-slate-200/80 bg-white transition hover:border-sky-300;
+  @apply overflow-hidden rounded-[10px] border border-slate-200/80 bg-white transition hover:border-sky-300;
 }
 
 .gallery-grid img {
@@ -98,7 +98,7 @@ textarea {
 }
 
 .hero-banner {
-  @apply relative overflow-hidden rounded-[28px] border border-slate-200/70;
+  @apply relative overflow-hidden rounded-[10px] border border-slate-200/70;
 }
 
 .hero-banner::after {
@@ -111,11 +111,11 @@ textarea {
 }
 
 .status-copy {
-  @apply rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900;
+  @apply rounded-[10px] border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900;
 }
 
 .camera-preview {
-  @apply h-full min-h-[20rem] w-full rounded-[22px] object-cover;
+  @apply h-full min-h-[20rem] w-full rounded-[10px] object-cover;
 }
 
 .pin-input input,

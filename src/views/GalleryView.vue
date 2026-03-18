@@ -34,13 +34,13 @@
                   <RouterLink :to="`/g/${slug}`">
                     <Button label="Scan Again" severity="secondary" outlined icon="pi pi-refresh" />
                   </RouterLink>
-                  <RouterLink v-if="profileCreated" :to="`/g/${slug}/all`">
+                  <RouterLink v-if="profileSummaryVisible" :to="`/g/${slug}/all`">
                     <Button label="View All Photos" icon="pi pi-images" />
                   </RouterLink>
                 </div>
               </div>
 
-              <form v-if="!profileCreated" class="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto]" @submit.prevent="saveProfile">
+              <form v-if="!profileSummaryVisible" class="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto]" @submit.prevent="saveProfile">
                 <InputText v-model.trim="profileForm.name" required placeholder="Full name" />
                 <InputText v-model.trim="profileForm.email" type="email" required placeholder="Email" />
                 <InputText v-model.trim="profileForm.phone" type="tel" placeholder="Phone" />
@@ -87,8 +87,8 @@
               </div>
 
               <div class="flex flex-wrap gap-3">
-                <RouterLink to="/">
-                  <Button label="Overview" severity="secondary" outlined icon="pi pi-home" />
+                <RouterLink to="/admin">
+                  <Button label="Admin" severity="secondary" outlined icon="pi pi-home" />
                 </RouterLink>
                 <RouterLink :to="`/g/${slug}`">
                   <Button label="Personal Link" icon="pi pi-camera" />
@@ -170,6 +170,10 @@
           <p class="helper-copy">Ask the organizer for the gallery PIN. Images stay locked until it is correct.</p>
         </div>
 
+        <Message v-if="commonPinMessage" :severity="commonPinMessageSeverity" :closable="false">
+          {{ commonPinMessage }}
+        </Message>
+
         <form class="grid gap-3" @submit.prevent="unlockCommonGallery">
           <InputText v-model.trim="commonPinInput" class="pin-input" type="text" inputmode="numeric" maxlength="4" placeholder="4-digit PIN" />
           <Button :label="loadingCommonPhotos ? 'Unlocking...' : 'Open Gallery'" :loading="loadingCommonPhotos" type="submit" :disabled="commonPinInput.trim().length !== 4" />
@@ -182,17 +186,17 @@
       modal
       dismissableMask
       :header="''"
-      :style="{ width: 'min(96vw, 88rem)' }"
-      :contentStyle="{ padding: '0' }"
+      :style="{ width: 'min(92vw, 72rem)' }"
+      :contentStyle="{ padding: '0', overflow: 'hidden' }"
       @update:visible="closePhoto"
     >
-      <div v-if="activePhoto" class="flex h-[86vh] max-h-[86vh] flex-col overflow-hidden">
-        <div class="flex-1 p-3 sm:p-4">
+      <div v-if="activePhoto" class="flex h-[78vh] max-h-[78vh] flex-col overflow-hidden">
+        <div class="flex min-h-0 flex-1 items-center justify-center p-3 sm:p-4">
           <div class="surface-muted flex h-full w-full items-center justify-center overflow-hidden p-2 sm:p-3">
             <img
               :src="activePhoto.storageImageUrl || activePhoto.thumbnailUrl"
               :alt="activePhoto.title"
-              class="h-full w-full rounded-[20px] object-contain"
+              class="block h-auto w-auto max-h-full max-w-full rounded-[10px] object-contain"
             />
           </div>
         </div>
@@ -223,6 +227,7 @@ import Button from "primevue/button";
 import Card from "primevue/card";
 import Dialog from "primevue/dialog";
 import InputText from "primevue/inputtext";
+import Message from "primevue/message";
 import Tag from "primevue/tag";
 import { getPublicGallery, getPublicGalleryPhotos, savePublicPersonProfile } from "../lib/api.js";
 
@@ -246,6 +251,9 @@ const savingProfile = ref(false);
 const loadingCommonPhotos = ref(false);
 const commonPinInput = ref("");
 const commonPinVerified = ref(false);
+const commonPinMessage = ref("");
+const commonPinMessageSeverity = ref("error");
+const profileRevealRequested = ref(false);
 
 const profileForm = reactive({
   name: "",
@@ -255,8 +263,14 @@ const profileForm = reactive({
 });
 
 const isPersonalResults = computed(() => route.query.source === "personal" && Boolean(personalResult.value));
-const profileCreated = computed(() => Boolean(personalResult.value?.person?.id && personalResult.value?.person?.email));
-const canShowPhotos = computed(() => (isPersonalResults.value ? profileCreated.value : commonPinVerified.value));
+const profileCreated = computed(() =>
+  Boolean(
+    personalResult.value?.profileCompleted
+      || (personalResult.value?.person?.id && (personalResult.value?.person?.email || profileForm.email.trim())),
+  ),
+);
+const profileSummaryVisible = computed(() => isPersonalResults.value && (profileCreated.value || profileRevealRequested.value));
+const canShowPhotos = computed(() => (isPersonalResults.value ? profileSummaryVisible.value : commonPinVerified.value));
 const showCommonPinModal = computed(() => !isPersonalResults.value && gallery.value && !commonPinVerified.value);
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
 const currentPhotoIndex = computed(() => displayPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
@@ -320,6 +334,7 @@ async function loadGallery() {
 
     commonPinInput.value = "";
     commonPinVerified.value = false;
+    commonPinMessage.value = "";
     status.value = "Enter the 4-digit PIN to unlock this gallery.";
     emptyMessage.value = "Enter the 4-digit PIN to unlock this gallery.";
   } catch (error) {
@@ -348,6 +363,7 @@ function hydrateProfileForm() {
   profileForm.email = person?.email || "";
   profileForm.phone = person?.phone || "";
   profileForm.company = person?.company || "";
+  profileRevealRequested.value = Boolean(personalResult.value?.profileCompleted);
 }
 
 async function saveProfile() {
@@ -362,8 +378,24 @@ async function saveProfile() {
   }
 
   try {
+    const optimisticPerson = {
+      ...(personalResult.value?.person || {}),
+      name: profileForm.name.trim(),
+      email: profileForm.email.trim(),
+      phone: profileForm.phone.trim(),
+      company: profileForm.company.trim(),
+    };
+
+    profileRevealRequested.value = true;
+    personalResult.value = {
+      ...personalResult.value,
+      person: optimisticPerson,
+      status: `Profile saved for ${optimisticPerson.name}. Your matched photos are ready.`,
+    };
+    persistPersonalResult();
+    status.value = `Profile saved for ${optimisticPerson.name}. Your matched photos are ready.`;
+
     savingProfile.value = true;
-    status.value = "Saving person profile...";
     const formData = new FormData();
 
     if (personalResult.value?.person?.id) {
@@ -381,15 +413,32 @@ async function saveProfile() {
 
     const response = await savePublicPersonProfile(props.slug, formData);
 
+    const savedPerson = {
+      ...(personalResult.value?.person || {}),
+      ...(response.person || {}),
+      name: response.person?.name || profileForm.name.trim(),
+      email: response.person?.email || profileForm.email.trim(),
+      phone: response.person?.phone || profileForm.phone.trim(),
+      company: response.person?.company || profileForm.company.trim(),
+    };
+
     personalResult.value = {
       ...personalResult.value,
-      person: response.person,
+      person: savedPerson,
+      profileCompleted: true,
       status: `Profile saved for ${response.person.name}. Your matched photos are ready.`,
     };
     persistPersonalResult();
     hydrateProfileForm();
     status.value = `Profile saved for ${response.person.name}. Your matched photos are ready.`;
   } catch (error) {
+    profileRevealRequested.value = false;
+    personalResult.value = {
+      ...personalResult.value,
+      profileCompleted: false,
+      status: error.message || "Unable to save the person profile.",
+    };
+    persistPersonalResult();
     status.value = error.message || "Unable to save the person profile.";
   } finally {
     savingProfile.value = false;
@@ -404,12 +453,15 @@ async function fetchCommonPhotos(pin, options = {}) {
   const normalizedPin = `${pin || ""}`.trim();
 
   if (normalizedPin.length !== 4) {
+    commonPinMessageSeverity.value = "warn";
+    commonPinMessage.value = "Enter the 4-digit gallery PIN.";
     status.value = "Enter the 4-digit gallery PIN.";
     return;
   }
 
   try {
     loadingCommonPhotos.value = true;
+    commonPinMessage.value = "";
     const response = await getPublicGalleryPhotos(props.slug, normalizedPin);
     photos.value = response.photos;
     commonPinVerified.value = true;
@@ -421,6 +473,8 @@ async function fetchCommonPhotos(pin, options = {}) {
   } catch (error) {
     commonPinVerified.value = false;
     photos.value = [];
+    commonPinMessageSeverity.value = "error";
+    commonPinMessage.value = error.message || "Invalid gallery PIN.";
     if (!options.silent) {
       status.value = error.message || "Invalid gallery PIN.";
     }

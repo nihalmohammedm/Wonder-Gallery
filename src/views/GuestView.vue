@@ -87,15 +87,19 @@
           <p class="helper-copy">Center your face, keep the frame steady, then capture.</p>
         </div>
 
+        <Message v-if="scanModalMessage" :severity="scanModalMessageSeverity" :closable="false">
+          {{ scanModalMessage }}
+        </Message>
+
         <div class="surface-muted overflow-hidden p-2">
           <video v-show="cameraMode === 'live'" ref="videoRef" autoplay playsinline muted class="camera-preview"></video>
           <img v-if="previewUrl" :src="previewUrl" alt="Captured selfie preview" class="camera-preview" />
-          <div v-if="cameraMode !== 'live' && !previewUrl" class="grid min-h-80 place-items-center rounded-[22px] bg-slate-100 text-sm text-slate-500">
+          <div v-if="cameraMode !== 'live' && !previewUrl" class="grid min-h-80 place-items-center rounded-[10px] bg-slate-100 text-sm text-slate-500">
             Camera preview will appear here.
           </div>
         </div>
 
-        <div v-if="submitting" class="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+        <div v-if="submitting" class="flex items-center gap-3 rounded-[10px] border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
           <ProgressSpinner strokeWidth="6" style="width: 1.5rem; height: 1.5rem" />
           <span>Matching your selfie against the gallery photos...</span>
         </div>
@@ -117,6 +121,7 @@ import { useRouter } from "vue-router";
 import Button from "primevue/button";
 import Card from "primevue/card";
 import Dialog from "primevue/dialog";
+import Message from "primevue/message";
 import ProgressSpinner from "primevue/progressspinner";
 import { getPublicGallery, matchSelfie } from "../lib/api.js";
 
@@ -139,6 +144,8 @@ const cameraMode = ref("idle");
 const scanModalOpen = ref(false);
 const authBusy = ref(false);
 const submitting = ref(false);
+const scanModalMessage = ref("");
+const scanModalMessageSeverity = ref("error");
 let mediaStream;
 
 onMounted(loadGallery);
@@ -163,6 +170,7 @@ async function openScanModal() {
   }
 
   scanModalOpen.value = true;
+  scanModalMessage.value = "";
   revokePreviewUrl();
   previewUrl.value = "";
   selfieDataUrl.value = "";
@@ -176,6 +184,7 @@ function closeScanModal() {
   }
 
   scanModalOpen.value = false;
+  scanModalMessage.value = "";
   stopCamera();
   revokePreviewUrl();
   previewUrl.value = "";
@@ -195,9 +204,12 @@ async function startCamera() {
     });
     videoRef.value.srcObject = mediaStream;
     cameraMode.value = "live";
+    scanModalMessage.value = "";
     status.value = "Camera ready. Capture a selfie to continue.";
   } catch {
     cameraMode.value = "idle";
+    scanModalMessageSeverity.value = "error";
+    scanModalMessage.value = "Unable to access the camera. Please allow camera access and try again.";
     status.value = "Unable to access the camera. Please allow camera access and try again.";
   } finally {
     authBusy.value = false;
@@ -218,6 +230,8 @@ async function captureSelfie() {
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
 
   if (!blob) {
+    scanModalMessageSeverity.value = "error";
+    scanModalMessage.value = "Unable to capture a selfie.";
     status.value = "Unable to capture a selfie.";
     return;
   }

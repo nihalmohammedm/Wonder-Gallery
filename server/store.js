@@ -87,6 +87,8 @@ export async function upsertGallery(input) {
     slug: input.slug,
     drive_link: input.driveLink,
     drive_folder_id: input.driveFolderId,
+    drive_links: input.driveLinks,
+    drive_folder_ids: input.driveFolderIds,
     is_public: input.isPublic,
     updated_at: new Date().toISOString(),
   };
@@ -589,12 +591,18 @@ async function toPersonRecord(row, selfieCount) {
 
 async function toGalleryRecord(row) {
   const headerImageUrl = await createSignedStorageUrl(getGalleryBucket(), row.header_image_path);
+  const driveLinks = normalizeTextArray(row.drive_links);
+  const driveFolderIds = normalizeTextArray(row.drive_folder_ids);
+  const primaryDriveLink = driveLinks[0] || row.drive_link || "";
+  const primaryDriveFolderId = driveFolderIds[0] || row.drive_folder_id || "";
   return {
     id: row.id,
     title: row.title,
     slug: row.slug,
-    driveLink: row.drive_link,
-    driveFolderId: row.drive_folder_id,
+    driveLink: primaryDriveLink,
+    driveFolderId: primaryDriveFolderId,
+    driveLinks: driveLinks.length ? driveLinks : [primaryDriveLink].filter(Boolean),
+    driveFolderIds: driveFolderIds.length ? driveFolderIds : [primaryDriveFolderId].filter(Boolean),
     commonAccessPin: row.common_access_pin || "",
     headerImagePath: row.header_image_path || "",
     headerImageUrl,
@@ -733,6 +741,14 @@ function countById(ids) {
   }
 
   return counts;
+}
+
+function normalizeTextArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
 function mergeGuests(legacyGuests, people) {
