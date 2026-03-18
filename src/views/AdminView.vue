@@ -1,5 +1,7 @@
 <template>
   <main class="app-shell">
+    <PageLoader v-if="showPageLoader" />
+
     <Card v-if="!authReady" class="surface-panel">
       <template #content>
         <div class="space-y-3">
@@ -18,7 +20,7 @@
             <h1 class="page-title !text-4xl">Sign in to manage PicDrop</h1>
             <p class="max-w-2xl text-base leading-7 text-slate-600">
               Admin access uses Supabase email and password authentication. Use an allowed admin account to create galleries,
-              sync Drive folders, upload headers, refresh common PINs, and review scanned people.
+              sync Drive folders, upload headers, refresh common PINs, and manage gallery images.
             </p>
           </div>
 
@@ -39,7 +41,7 @@
               <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
                 <div class="space-y-3">
                   <p class="eyebrow">Admin Dashboard</p>
-                  <h1 class="page-title !text-4xl">Common dashboard</h1>
+                  <h1 class="page-title !text-4xl">Pic Drop</h1>
                   <p class="max-w-3xl text-base leading-7 text-slate-600">
                     Monitor the whole workspace first, then open any gallery card to manage that event in a dedicated panel.
                   </p>
@@ -51,7 +53,7 @@
                 </div>
               </div>
 
-              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-3">
                 <div class="surface-muted p-5">
                   <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Galleries</p>
                   <p class="mt-2 text-3xl font-semibold text-slate-950">{{ galleries.length }}</p>
@@ -59,10 +61,6 @@
                 <div class="surface-muted p-5">
                   <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Total Images</p>
                   <p class="mt-2 text-3xl font-semibold text-slate-950">{{ totalImages }}</p>
-                </div>
-                <div class="surface-muted p-5">
-                  <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">People Registered</p>
-                  <p class="mt-2 text-3xl font-semibold text-slate-950">{{ totalPeopleRegistered }}</p>
                 </div>
                 <div class="surface-muted p-5">
                   <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Faces Indexed</p>
@@ -119,7 +117,6 @@
                     </div>
                     <div class="flex flex-wrap gap-2">
                       <span class="metric-pill">{{ galleryPhotoCount(gallery.id) }} images</span>
-                      <span class="metric-pill">{{ galleryGuestCount(gallery.id) }} people</span>
                       <span class="metric-pill">{{ galleryIndexedPhotoCount(gallery.id) }} indexed</span>
                     </div>
                   </div>
@@ -153,15 +150,11 @@
 
           <AdminGalleryWorkspace
             :selected-gallery="selectedGallery"
-            :selected-gallery-guests="selectedGalleryGuests"
             :selected-gallery-photos="selectedGalleryPhotos"
             :galleries="galleries"
-            :photo-guests="photoGuests"
-            :guest-form="guestForm"
             :photo-form="photoForm"
             :saving="saving"
             :gallery-photo-count="galleryPhotoCount(selectedGallery.id)"
-            :gallery-guest-count="galleryGuestCount(selectedGallery.id)"
             :gallery-face-count="galleryFaceCount(selectedGallery.id)"
             :gallery-indexed-photo-count="galleryIndexedPhotoCount(selectedGallery.id)"
             :personal-url="personalUrl"
@@ -172,8 +165,6 @@
             :on-sync-drive="syncDriveGallery"
             :on-refresh-pin="refreshPin"
             :on-upload-header-image="uploadHeaderImage"
-            :on-submit-guest="submitGuest"
-            :on-handle-guest-file="handleGuestFile"
             :on-submit-photo="submitPhoto"
             :on-open-photo="openPhoto"
           />
@@ -276,15 +267,11 @@
         v-if="selectedGallery"
         class="p-1"
         :selected-gallery="selectedGallery"
-        :selected-gallery-guests="selectedGalleryGuests"
         :selected-gallery-photos="selectedGalleryPhotos"
         :galleries="galleries"
-        :photo-guests="photoGuests"
-        :guest-form="guestForm"
         :photo-form="photoForm"
         :saving="saving"
         :gallery-photo-count="galleryPhotoCount(selectedGallery.id)"
-        :gallery-guest-count="galleryGuestCount(selectedGallery.id)"
         :gallery-face-count="galleryFaceCount(selectedGallery.id)"
         :gallery-indexed-photo-count="galleryIndexedPhotoCount(selectedGallery.id)"
         :personal-url="personalUrl"
@@ -295,8 +282,6 @@
         :on-sync-drive="syncDriveGallery"
         :on-refresh-pin="refreshPin"
         :on-upload-header-image="uploadHeaderImage"
-        :on-submit-guest="submitGuest"
-        :on-handle-guest-file="handleGuestFile"
         :on-submit-photo="submitPhoto"
         :on-open-photo="openPhoto"
       />
@@ -362,13 +347,12 @@ import Dialog from "primevue/dialog";
 import Drawer from "primevue/drawer";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
-import MultiSelect from "primevue/multiselect";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import AdminGalleryWorkspace from "../components/AdminGalleryWorkspace.vue";
+import PageLoader from "../components/PageLoader.vue";
 import {
   createGallery,
-  createGuest,
   createPhoto,
   deleteGallery,
   getAdminSnapshot,
@@ -383,7 +367,6 @@ import { getSession, getSupabaseBrowserClient, signInWithPassword, signOut } fro
 const route = useRoute();
 const router = useRouter();
 const galleries = ref([]);
-const guests = ref([]);
 const photos = ref([]);
 const feedback = ref("");
 const error = ref("");
@@ -392,6 +375,7 @@ const galleryFormError = ref("");
 const session = ref(null);
 const authReady = ref(false);
 const authBusy = ref(false);
+const loadingSnapshot = ref(false);
 const activeGalleryId = ref("");
 const activePhoto = ref(null);
 const galleryPanelOpen = ref(false);
@@ -399,7 +383,6 @@ const galleryFormDialogOpen = ref(false);
 const galleryFormMode = ref("create");
 const saving = reactive({
   gallery: false,
-  guest: false,
   photo: false,
   headerImageGalleryId: "",
   deleteGalleryId: "",
@@ -423,28 +406,17 @@ const loginForm = reactive({
   password: "",
 });
 
-const guestForm = reactive({
-  name: "",
-  galleryId: "",
-  image: null,
-});
-
 const photoForm = reactive({
   galleryId: "",
   title: "",
   driveLink: "",
   capturedAt: "",
-  guestIds: [],
 });
 
 const selectedGallery = computed(() => galleries.value.find((gallery) => gallery.id === activeGalleryId.value) || galleries.value[0] || null);
 const totalImages = computed(() => photos.value.length);
-const totalPeopleRegistered = computed(() => guests.value.length);
 const totalFacesIndexed = computed(() => photos.value.reduce((total, photo) => total + (Number(photo.faceCount) || 0), 0));
 const isGalleryRoute = computed(() => Boolean(route.params.galleryId));
-const selectedGalleryGuests = computed(() =>
-  selectedGallery.value ? guests.value.filter((guest) => guest.galleryId === selectedGallery.value.id) : [],
-);
 const selectedGalleryPhotos = computed(() =>
   selectedGallery.value
     ? photos.value
@@ -463,7 +435,7 @@ const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhoto
 const currentPhotoPositionLabel = computed(() =>
   currentPhotoIndex.value >= 0 ? `Image ${currentPhotoIndex.value + 1} of ${selectedGalleryPhotos.value.length}` : "",
 );
-const photoGuests = computed(() => guests.value.filter((guest) => guest.galleryId === photoForm.galleryId));
+const showPageLoader = computed(() => !authReady.value || (Boolean(session.value) && loadingSnapshot.value));
 
 let authSubscription;
 
@@ -505,26 +477,14 @@ watch(
 
 watch(selectedGallery, (gallery) => {
   if (!gallery) {
-    guestForm.galleryId = "";
     photoForm.galleryId = "";
     return;
-  }
-
-  if (!guestForm.galleryId || !galleries.value.some((item) => item.id === guestForm.galleryId)) {
-    guestForm.galleryId = gallery.id;
   }
 
   if (!photoForm.galleryId || !galleries.value.some((item) => item.id === photoForm.galleryId)) {
     photoForm.galleryId = gallery.id;
   }
 });
-
-watch(
-  () => photoForm.galleryId,
-  () => {
-    photoForm.guestIds = photoForm.guestIds.filter((guestId) => photoGuests.value.some((guest) => guest.id === guestId));
-  },
-);
 
 watch(
   () => photos.value,
@@ -585,20 +545,21 @@ async function handleSessionChange(nextSession) {
 
 function clearSnapshot() {
   galleries.value = [];
-  guests.value = [];
   photos.value = [];
   activePhoto.value = null;
 }
 
 async function loadSnapshot() {
   try {
+    loadingSnapshot.value = true;
     error.value = "";
     const snapshot = await getAdminSnapshot();
     galleries.value = snapshot.galleries;
-    guests.value = snapshot.guests;
     photos.value = snapshot.photos;
   } catch (loadError) {
     error.value = loadError.message;
+  } finally {
+    loadingSnapshot.value = false;
   }
 }
 
@@ -745,39 +706,6 @@ function openEditGalleryDialog(gallery) {
   galleryFormDialogOpen.value = true;
 }
 
-function handleGuestFile(event) {
-  guestForm.image = event.target.files?.[0] || null;
-}
-
-async function submitGuest() {
-  if (!guestForm.image) {
-    error.value = "Choose a reference selfie for the guest.";
-    return;
-  }
-
-  try {
-    saving.guest = true;
-    error.value = "";
-    const formData = new FormData();
-    formData.set("name", guestForm.name);
-    formData.set("galleryId", guestForm.galleryId);
-    formData.set("image", guestForm.image);
-    await createGuest(formData);
-    feedback.value = "Guest added.";
-    setActiveGallery(guestForm.galleryId);
-    Object.assign(guestForm, {
-      name: "",
-      galleryId: guestForm.galleryId,
-      image: null,
-    });
-    await loadSnapshot();
-  } catch (submitError) {
-    error.value = submitError.message;
-  } finally {
-    saving.guest = false;
-  }
-}
-
 async function submitPhoto() {
   try {
     saving.photo = true;
@@ -787,7 +715,6 @@ async function submitPhoto() {
       title: photoForm.title,
       driveLink: photoForm.driveLink,
       capturedAt: photoForm.capturedAt,
-      guestIds: photoForm.guestIds,
     });
     feedback.value = buildIndexingFeedback(result.indexing, "Photo mapped.");
     setActiveGallery(photoForm.galleryId);
@@ -796,7 +723,6 @@ async function submitPhoto() {
       title: "",
       driveLink: "",
       capturedAt: "",
-      guestIds: [],
     });
     await loadSnapshot();
   } catch (submitError) {
@@ -930,7 +856,6 @@ async function refreshPin(gallery) {
 
 function setActiveGallery(galleryId) {
   activeGalleryId.value = galleryId;
-  guestForm.galleryId = galleryId;
   photoForm.galleryId = galleryId;
 }
 
@@ -945,10 +870,6 @@ async function openGalleryPage(galleryId) {
   await router.push({ name: "admin-gallery", params: { galleryId } });
 }
 
-function galleryGuestCount(galleryId) {
-  return guests.value.filter((guest) => guest.galleryId === galleryId).length;
-}
-
 function galleryPhotoCount(galleryId) {
   return photos.value.filter((photo) => photo.galleryId === galleryId).length;
 }
@@ -961,13 +882,6 @@ function galleryFaceCount(galleryId) {
   return photos.value
     .filter((photo) => photo.galleryId === galleryId)
     .reduce((total, photo) => total + (Number(photo.faceCount) || 0), 0);
-}
-
-function photoGuestNames(photo) {
-  return photo.guestIds
-    .map((guestId) => guests.value.find((guest) => guest.id === guestId)?.name)
-    .filter(Boolean)
-    .join(", ");
 }
 
 function openPhoto(photo) {

@@ -1,5 +1,7 @@
 <template>
   <main class="app-shell gallery-theme space-y-6" :style="themeStyle(personalAccentColor)">
+    <PageLoader v-if="showPageLoader" />
+
     <section class="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
       <div class="space-y-6">
         <section
@@ -24,11 +26,11 @@
                 <p class="eyebrow">Personal Link</p>
                 <h2 class="section-title">Scan your face to find your photos</h2>
                 <p class="helper-copy">
-                  Capture a clear selfie to search the event gallery. If your profile already exists, PicDrop reuses it.
-                  If not, you will be asked to complete the profile before the gallery opens.
+                  You are consenting to the collection and use of your selfie and facial biometric data for the purpose of identifying and delivering your event photos. your data may be processed by third-party AI service providers solely for this purpose.
+
                 </p>
                 <p class="helper-copy">
-                  By continuing, you consent to using your selfie and facial biometric data solely for identification and event photo delivery.
+                 By clicking “Scan my Face”, you consent to using your selfie and facial biometric data solely for identification and event photo delivery.
                 </p>
               </div>
 
@@ -123,6 +125,7 @@ import Card from "primevue/card";
 import Dialog from "primevue/dialog";
 import Message from "primevue/message";
 import ProgressSpinner from "primevue/progressspinner";
+import PageLoader from "../components/PageLoader.vue";
 import { getPublicGallery, matchSelfie } from "../lib/api.js";
 
 const PERSONAL_MATCH_STORAGE_PREFIX = "picdrop-personal-match";
@@ -144,11 +147,13 @@ const cameraMode = ref("idle");
 const scanModalOpen = ref(false);
 const authBusy = ref(false);
 const submitting = ref(false);
+const loadingGallery = ref(true);
 const scanModalMessage = ref("");
 const scanModalMessageSeverity = ref("error");
 let mediaStream;
 const DEFAULT_ACCENT_COLOR = "#0f5bd8";
 const personalAccentColor = computed(() => normalizeAccentColor(gallery.value?.personalAccentColor, DEFAULT_ACCENT_COLOR));
+const showPageLoader = computed(() => loadingGallery.value || submitting.value);
 
 onMounted(loadGallery);
 onBeforeUnmount(() => {
@@ -163,6 +168,8 @@ async function loadGallery() {
     status.value = "Ready to scan. Capture a selfie to continue into your matched gallery.";
   } catch (error) {
     status.value = error.message;
+  } finally {
+    loadingGallery.value = false;
   }
 }
 

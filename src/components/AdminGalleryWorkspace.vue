@@ -7,7 +7,7 @@
             <div class="space-y-3">
               <p class="eyebrow">Selected Gallery</p>
               <p class="max-w-2xl text-sm leading-6 text-slate-600">
-                Manage links, header image, Drive sync, people, and photos for this event.
+                Manage links, header image, Drive sync, and photos for this event.
               </p>
             </div>
             <div class="flex flex-wrap gap-3">
@@ -36,14 +36,10 @@
             </div>
           </div>
 
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-3">
             <div class="surface-muted p-4">
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Photos</p>
               <p class="mt-2 text-2xl font-semibold text-slate-950">{{ galleryPhotoCount }}</p>
-            </div>
-            <div class="surface-muted p-4">
-              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">People</p>
-              <p class="mt-2 text-2xl font-semibold text-slate-950">{{ galleryGuestCount }}</p>
             </div>
             <div class="surface-muted p-4">
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Faces Indexed</p>
@@ -146,57 +142,6 @@
       <template #content>
         <div class="space-y-6">
           <div class="space-y-2">
-            <p class="eyebrow">People</p>
-            <h2 class="section-title">People and Reference Scans</h2>
-            <p class="helper-copy">Add manual reference anchors when you need curated people or extra selfie images for this gallery.</p>
-          </div>
-
-          <form class="grid gap-4 md:grid-cols-2" @submit.prevent="onSubmitGuest">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700">Name</label>
-              <InputText v-model.trim="guestForm.name" required placeholder="Nihal" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700">Gallery</label>
-              <Select v-model="guestForm.galleryId" :options="galleries" optionLabel="title" optionValue="id" placeholder="Select a gallery" />
-            </div>
-            <div class="space-y-2 md:col-span-2">
-              <label class="text-sm font-medium text-slate-700">Reference selfie</label>
-              <input type="file" accept="image/*" class="block w-full rounded-[10px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600" @change="onHandleGuestFile" />
-            </div>
-            <div class="md:col-span-2">
-              <Button :label="saving.guest ? 'Adding Reference...' : 'Add Reference'" :loading="saving.guest" type="submit" />
-            </div>
-          </form>
-
-          <div v-if="selectedGalleryGuests.length" class="grid gap-3 md:grid-cols-2">
-            <div v-for="guest in selectedGalleryGuests" :key="guest.id" class="surface-muted flex items-center gap-4 p-4">
-              <img
-                v-if="guest.referenceImageUrl"
-                :src="guest.referenceImageUrl"
-                :alt="`${guest.name} reference`"
-                class="h-14 w-14 rounded-full border border-slate-200 object-cover"
-              />
-              <div v-else class="grid h-14 w-14 place-items-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-600">
-                {{ guest.name.slice(0, 1).toUpperCase() }}
-              </div>
-              <div>
-                <p class="text-sm font-semibold text-slate-900">{{ guest.name }}</p>
-                <p class="text-xs text-slate-500">{{ guest.selfieCount || 0 }} {{ guest.selfieCount === 1 ? "selfie" : "selfies" }}</p>
-              </div>
-            </div>
-          </div>
-          <div v-else class="surface-muted p-4 text-sm text-slate-500">
-            No people or reference scans added for this gallery yet.
-          </div>
-        </div>
-      </template>
-    </Card>
-
-    <Card class="surface-panel">
-      <template #content>
-        <div class="space-y-6">
-          <div class="space-y-2">
             <p class="eyebrow">Photo Sources</p>
             <h2 class="section-title">Manual photo entry</h2>
             <p class="helper-copy">Drive sync is the main ingestion path. Manual entries help when you need one image mapped immediately.</p>
@@ -218,17 +163,6 @@
             <div class="space-y-2">
               <label class="text-sm font-medium text-slate-700">Captured on</label>
               <InputText v-model="photoForm.capturedAt" type="date" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700">Tagged people</label>
-              <MultiSelect
-                v-model="photoForm.guestIds"
-                :options="photoGuests"
-                optionLabel="name"
-                optionValue="id"
-                display="chip"
-                placeholder="Select tagged people"
-              />
             </div>
             <div class="md:col-span-2">
               <Button :label="saving.photo ? 'Adding Photo...' : 'Add Manual Photo'" :loading="saving.photo" type="submit" />
@@ -276,21 +210,16 @@
 import Button from "primevue/button";
 import Card from "primevue/card";
 import InputText from "primevue/inputtext";
-import MultiSelect from "primevue/multiselect";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 
 defineProps({
   selectedGallery: { type: Object, default: null },
-  selectedGalleryGuests: { type: Array, default: () => [] },
   selectedGalleryPhotos: { type: Array, default: () => [] },
   galleries: { type: Array, default: () => [] },
-  photoGuests: { type: Array, default: () => [] },
-  guestForm: { type: Object, required: true },
   photoForm: { type: Object, required: true },
   saving: { type: Object, required: true },
   galleryPhotoCount: { type: Number, default: 0 },
-  galleryGuestCount: { type: Number, default: 0 },
   galleryFaceCount: { type: Number, default: 0 },
   galleryIndexedPhotoCount: { type: Number, default: 0 },
   personalUrl: { type: Function, required: true },
@@ -301,8 +230,6 @@ defineProps({
   onSyncDrive: { type: Function, required: true },
   onRefreshPin: { type: Function, required: true },
   onUploadHeaderImage: { type: Function, required: true },
-  onSubmitGuest: { type: Function, required: true },
-  onHandleGuestFile: { type: Function, required: true },
   onSubmitPhoto: { type: Function, required: true },
   onOpenPhoto: { type: Function, required: true },
 });

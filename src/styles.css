@@ -114,6 +114,32 @@ textarea {
   @apply rounded-[10px] border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900;
 }
 
+.page-loader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top, rgba(var(--gallery-accent-rgb, 15, 91, 216), 0.14), transparent 32%),
+    rgba(248, 250, 252, 0.84);
+  backdrop-filter: blur(14px);
+}
+
+.page-loader-inline {
+  display: grid;
+  place-items: center;
+  min-height: 16rem;
+  padding: 1.5rem;
+}
+
+.page-loader-spinner {
+  width: 3rem;
+  height: 3rem;
+  color: var(--gallery-accent, #0f5bd8);
+}
+
 .gallery-theme .eyebrow {
   color: var(--gallery-accent);
 }

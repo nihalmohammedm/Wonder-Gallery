@@ -80,6 +80,27 @@ export function findPhotoById(store, photoId) {
   return store.photos.find((photo) => photo.id === photoId);
 }
 
+export async function getGalleryBySlug(slug) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("galleries").select("*").eq("slug", slug).maybeSingle();
+  throwIfError(result.error);
+  return result.data ? toGalleryRecord(result.data) : null;
+}
+
+export async function listPhotosByGalleryId(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const [photosResult, photoFacesResult] = await Promise.all([
+    supabase.from("photos").select("*").eq("gallery_id", galleryId).order("created_at", { ascending: false }),
+    supabase.from("photo_faces").select("photo_id").eq("gallery_id", galleryId),
+  ]);
+
+  throwIfError(photosResult.error);
+  throwIfError(photoFacesResult.error);
+
+  const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
+  return Promise.all((photosResult.data || []).map((row) => toPhotoRecord(row, photoFaceCountByPhotoId)));
+}
+
 export async function upsertGallery(input) {
   const supabase = getSupabaseAdmin();
   const existingResult = await supabase.from("galleries").select("*").eq("slug", input.slug).maybeSingle();

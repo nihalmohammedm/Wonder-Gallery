@@ -1,5 +1,7 @@
 <template>
   <main class="app-shell gallery-theme space-y-6" :style="themeStyle(activeAccentColor)">
+    <PageLoader v-if="showPageLoader" />
+
     <template v-if="isPersonalResults">
       <section class="space-y-6">
         <section class="hero-banner" :style="bannerStyle(gallery)">
@@ -99,17 +101,17 @@
           <div class="space-y-6 p-6 lg:p-8" :style="heroStyle(gallery)">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div class="space-y-3">
-                <p class="eyebrow">Common Link</p>
+                <p class="eyebrow">Common Gallery</p>
                 <h1 class="page-title !text-4xl">{{ gallery?.title || "Gallery" }}</h1>
-                <p class="max-w-2xl text-base leading-7 text-slate-600">Enter the 4-digit gallery PIN to unlock the event wall.</p>
+                <!-- <p class="max-w-2xl text-base leading-7 text-slate-600">Enter the 4-digit gallery PIN to unlock the event wall.</p> -->
               </div>
 
               <div class="flex flex-wrap gap-3">
-                <RouterLink to="/admin">
+                <!-- <RouterLink to="/admin">
                   <Button label="Admin" severity="secondary" outlined icon="pi pi-home" />
-                </RouterLink>
+                </RouterLink> -->
                 <RouterLink :to="`/g/${slug}`">
-                  <Button label="Personal Link" icon="pi pi-camera" :style="filledButtonStyle(commonAccentColor)" />
+                  <Button label="Find your Photos" icon="pi pi-camera" :style="filledButtonStyle(commonAccentColor)" />
                 </RouterLink>
               </div>
             </div>
@@ -247,6 +249,7 @@ import Dialog from "primevue/dialog";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
 import Tag from "primevue/tag";
+import PageLoader from "../components/PageLoader.vue";
 import { getPublicGallery, getPublicGalleryPhotos, savePublicPersonProfile } from "../lib/api.js";
 
 const PERSONAL_MATCH_STORAGE_PREFIX = "picdrop-personal-match";
@@ -267,6 +270,7 @@ const personalResult = ref(null);
 const activePhoto = ref(null);
 const savingProfile = ref(false);
 const loadingCommonPhotos = ref(false);
+const loadingGallery = ref(true);
 const commonPinInput = ref("");
 const commonPinVerified = ref(false);
 const commonPinMessage = ref("");
@@ -294,6 +298,7 @@ const profileSummaryVisible = computed(() => isPersonalResults.value && personal
 const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
 const showCommonPinModal = computed(() => !isPersonalResults.value && gallery.value && !commonPinVerified.value);
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
+const showPageLoader = computed(() => loadingGallery.value || loadingCommonPhotos.value || savingProfile.value);
 const currentPhotoIndex = computed(() => displayPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
 const hasPreviousPhoto = computed(() => currentPhotoIndex.value > 0);
 const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhotoIndex.value < displayPhotos.value.length - 1);
@@ -364,6 +369,8 @@ async function loadGallery() {
   } catch (error) {
     status.value = error.message;
     emptyMessage.value = "This gallery is not available.";
+  } finally {
+    loadingGallery.value = false;
   }
 }
 

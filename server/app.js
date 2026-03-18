@@ -32,14 +32,15 @@ import {
   updateGalleryHeaderImage,
   refreshGalleryAccessPin,
   findGalleryById,
-  findGalleryBySlug,
   findPhotoById,
   findPersonById,
+  getGalleryBySlug,
   updatePersonProfile,
   deleteGallery as deleteGalleryRecord,
   getGalleryDriveConnection,
   listDriveSyncStatesByGallery,
   listAllPersonEncodings,
+  listPhotosByGalleryId,
   listPersonFaceEncodings,
   listPhotoFacesByGallery,
   parseDriveId,
@@ -381,8 +382,7 @@ export function createApp() {
 
   app.get("/api/public/galleries/:slug", async (request, response, next) => {
     try {
-      const store = await readStore();
-      const gallery = findGalleryBySlug(store, request.params.slug);
+      const gallery = await getGalleryBySlug(request.params.slug);
 
       if (!gallery || !gallery.isPublic) {
         return response.status(404).json({ error: "Gallery not found or public access is disabled" });
@@ -396,8 +396,7 @@ export function createApp() {
 
   app.get("/api/public/galleries/:slug/photos", async (request, response, next) => {
     try {
-      const store = await readStore();
-      const gallery = findGalleryBySlug(store, request.params.slug);
+      const gallery = await getGalleryBySlug(request.params.slug);
 
       if (!gallery || !gallery.isPublic) {
         return response.status(404).json({ error: "Gallery not found or public access is disabled" });
@@ -409,7 +408,7 @@ export function createApp() {
         return response.status(403).json({ error: "A valid 4-digit PIN is required to open this gallery." });
       }
 
-      const photos = store.photos.filter((photo) => photo.galleryId === gallery.id);
+      const photos = await listPhotosByGalleryId(gallery.id);
       response.json({ gallery: toPublicGallery(gallery), photos });
     } catch (error) {
       next(error);
@@ -418,8 +417,7 @@ export function createApp() {
 
   app.post("/api/public/galleries/:slug/person-profile", upload.single("selfie"), async (request, response, next) => {
     try {
-      const store = await readStore();
-      const gallery = findGalleryBySlug(store, request.params.slug);
+      const gallery = await getGalleryBySlug(request.params.slug);
 
       if (!gallery || !gallery.isPublic) {
         return response.status(404).json({ error: "Gallery not found or public access is disabled" });
@@ -507,8 +505,7 @@ export function createApp() {
 
   app.post("/api/public/galleries/:slug/match", upload.single("selfie"), async (request, response, next) => {
     try {
-      const store = await readStore();
-      const gallery = findGalleryBySlug(store, request.params.slug);
+      const gallery = await getGalleryBySlug(request.params.slug);
 
       if (!gallery || !gallery.isPublic) {
         return response.status(404).json({ error: "Gallery not found or public access is disabled" });
@@ -549,7 +546,7 @@ export function createApp() {
         mimeType: request.file.mimetype,
         extractedSelfieEncoding,
       });
-      const photos = store.photos.filter((photo) => photo.galleryId === gallery.id);
+      const photos = await listPhotosByGalleryId(gallery.id);
       const photoFaces = await listPhotoFacesByGallery(gallery.id);
       const result = findPhotoMatches(referenceEncodings, photos, photoFaces);
       const diagnostics = {
