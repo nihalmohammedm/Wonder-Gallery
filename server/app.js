@@ -45,6 +45,7 @@ import {
   listPhotoFacesByGallery,
   parseDriveId,
   readStore,
+  replacePersonFaceEncodings,
   replacePhotoFacesForPhoto,
   saveGalleryDriveConnection,
   saveGalleryImage,
@@ -936,6 +937,8 @@ async function detectExistingPersonForEncoding({ galleryId, encoding }) {
 
 async function saveSelfieEncodingForPerson({ person, galleryId, buffer, mimeType, source }) {
   const primaryFace = await extractPrimaryFaceEncoding(buffer, mimeType, { persistUpload: true });
+
+  await replacePersonFaceEncodings(person.id);
 
   return addPersonFaceEncoding({
     personId: person.id,

@@ -2,17 +2,7 @@
   <main class="app-shell">
     <PageLoader v-if="showPageLoader" />
 
-    <Card v-if="!authReady" class="surface-panel">
-      <template #content>
-        <div class="space-y-3">
-          <p class="eyebrow">Authentication</p>
-          <h1 class="section-title">Checking your session</h1>
-          <p class="helper-copy">Verifying whether you already have an active admin login.</p>
-        </div>
-      </template>
-    </Card>
-
-    <Card v-else-if="!session" class="surface-panel">
+    <Card v-if="authReady && !session" class="surface-panel">
       <template #content>
         <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div class="space-y-3">
