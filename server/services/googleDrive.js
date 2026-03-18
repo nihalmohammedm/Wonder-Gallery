@@ -8,8 +8,18 @@ const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
 const STATE_TTL_MS = 10 * 60 * 1000;
-const UNSUPPORTED_IMAGE_EXTENSIONS = new Set(["heic", "heif"]);
-const UNSUPPORTED_IMAGE_MIME_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
+const ALLOWED_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "heic", "heif"]);
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
+]);
+const THUMBNAIL_FALLBACK_IMAGE_EXTENSIONS = new Set(["heic", "heif"]);
+const THUMBNAIL_FALLBACK_IMAGE_MIME_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
 
 export async function listDriveFolderImages(folderId, refreshToken) {
   const drive = getDriveClient(refreshToken);
@@ -170,10 +180,18 @@ export function getDriveFileExtension(fileName, mimeType) {
   return "jpg";
 }
 
-export function isUnsupportedDriveImage(fileName, mimeType) {
+export function isAllowedDriveImage(fileName, mimeType) {
   const extension = path.extname(fileName || "").toLowerCase().replace(".", "");
+  const normalizedMimeType = (mimeType || "").toLowerCase();
 
-  return UNSUPPORTED_IMAGE_EXTENSIONS.has(extension) || UNSUPPORTED_IMAGE_MIME_TYPES.has((mimeType || "").toLowerCase());
+  return ALLOWED_IMAGE_EXTENSIONS.has(extension) || ALLOWED_IMAGE_MIME_TYPES.has(normalizedMimeType);
+}
+
+export function requiresDriveThumbnailFallback(fileName, mimeType) {
+  const extension = path.extname(fileName || "").toLowerCase().replace(".", "");
+  const normalizedMimeType = (mimeType || "").toLowerCase();
+
+  return THUMBNAIL_FALLBACK_IMAGE_EXTENSIONS.has(extension) || THUMBNAIL_FALLBACK_IMAGE_MIME_TYPES.has(normalizedMimeType);
 }
 
 function getDriveClient(refreshToken) {

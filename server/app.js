@@ -20,8 +20,9 @@ import {
   downloadDriveFile,
   downloadDriveThumbnail,
   exchangeDriveCode,
-  isUnsupportedDriveImage,
+  isAllowedDriveImage,
   listDriveFolderImages,
+  requiresDriveThumbnailFallback,
 } from "./services/googleDrive.js";
 import { ensureOtpAuthUser, isAllowedAdminEmail, verifySupabaseAccessToken } from "./supabase.js";
 import {
@@ -736,6 +737,14 @@ async function syncDriveFile({ gallery, driveConnection, file, existingPhoto }) 
     };
   }
 
+  if (!isAllowedDriveImage(file.name, file.mimeType)) {
+    return {
+      type: "skipped",
+      name: file.name,
+      reason: "Unsupported file format. Only JPG, JPEG, PNG, HEIC, and HEIF are allowed.",
+    };
+  }
+
   try {
     const preview = await buildSyncPreview({
       file,
@@ -782,7 +791,7 @@ async function syncDriveFile({ gallery, driveConnection, file, existingPhoto }) 
 
 async function buildSyncPreview({ file, refreshToken }) {
   try {
-    if (isUnsupportedDriveImage(file.name, file.mimeType)) {
+    if (requiresDriveThumbnailFallback(file.name, file.mimeType)) {
       throw new Error("HEIC/HEIF original requires thumbnail fallback");
     }
 
