@@ -1,5 +1,8 @@
 import { getGalleryBucket, getStorageBucket, getSupabaseAdmin } from "./supabase.js";
 
+const DEFAULT_PERSONAL_ACCENT_COLOR = "#0f5bd8";
+const DEFAULT_COMMON_ACCENT_COLOR = "#0f5bd8";
+
 export async function ensureStore() {
   getSupabaseAdmin();
 }
@@ -89,6 +92,8 @@ export async function upsertGallery(input) {
     drive_folder_id: input.driveFolderId,
     drive_links: input.driveLinks,
     drive_folder_ids: input.driveFolderIds,
+    personal_accent_color: normalizeAccentColor(input.personalAccentColor, DEFAULT_PERSONAL_ACCENT_COLOR),
+    common_accent_color: normalizeAccentColor(input.commonAccentColor, DEFAULT_COMMON_ACCENT_COLOR),
     is_public: input.isPublic,
     updated_at: new Date().toISOString(),
   };
@@ -613,6 +618,8 @@ async function toGalleryRecord(row) {
     driveLinks: driveLinks.length ? driveLinks : [primaryDriveLink].filter(Boolean),
     driveFolderIds: driveFolderIds.length ? driveFolderIds : [primaryDriveFolderId].filter(Boolean),
     commonAccessPin: row.common_access_pin || "",
+    personalAccentColor: normalizeAccentColor(row.personal_accent_color, DEFAULT_PERSONAL_ACCENT_COLOR),
+    commonAccentColor: normalizeAccentColor(row.common_accent_color, DEFAULT_COMMON_ACCENT_COLOR),
     headerImagePath: row.header_image_path || "",
     headerImageUrl,
     hasDriveConnection: Boolean(row.drive_refresh_token),
@@ -758,6 +765,11 @@ function normalizeTextArray(value) {
   }
 
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function normalizeAccentColor(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
 }
 
 function mergeGuests(legacyGuests, people) {

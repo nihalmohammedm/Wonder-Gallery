@@ -110,6 +110,8 @@ export function createApp() {
     try {
       const { title, slug, driveLink, driveLinks, isPublic } = request.body;
       const normalizedDriveLinks = normalizeDriveLinks(driveLinks?.length ? driveLinks : driveLink);
+      const personalAccentColor = normalizeAccentColorField(request.body?.personalAccentColor);
+      const commonAccentColor = normalizeAccentColorField(request.body?.commonAccentColor);
 
       if (!title || !slug || !normalizedDriveLinks.length) {
         return response.status(400).json({ error: "title, slug, and at least one driveLink are required" });
@@ -122,6 +124,8 @@ export function createApp() {
         driveFolderId: parseDriveId(normalizedDriveLinks[0]),
         driveLinks: normalizedDriveLinks,
         driveFolderIds: normalizedDriveLinks.map((link) => parseDriveId(link)).filter(Boolean),
+        personalAccentColor,
+        commonAccentColor,
         isPublic: Boolean(isPublic),
       });
 
@@ -974,6 +978,15 @@ function buildDraftPersonName() {
   return `Guest ${new Date().toISOString().slice(0, 19).replace("T", " ")}`;
 }
 
+function normalizeAccentColorField(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : "";
+}
+
 function toPublicGallery(gallery) {
   return {
     id: gallery.id,
@@ -983,6 +996,8 @@ function toPublicGallery(gallery) {
     driveFolderId: gallery.driveFolderId,
     headerImagePath: gallery.headerImagePath,
     headerImageUrl: gallery.headerImageUrl,
+    personalAccentColor: gallery.personalAccentColor,
+    commonAccentColor: gallery.commonAccentColor,
     hasDriveConnection: gallery.hasDriveConnection,
     isPublic: gallery.isPublic,
     createdAt: gallery.createdAt,

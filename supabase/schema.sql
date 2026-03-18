@@ -10,6 +10,8 @@ create table if not exists public.galleries (
   drive_folder_ids text[] not null default '{}',
   common_access_pin text,
   header_image_path text,
+  personal_accent_color text,
+  common_accent_color text,
   drive_refresh_token text,
   drive_connected_email text,
   drive_connected_name text,
@@ -23,6 +25,8 @@ alter table public.galleries add column if not exists drive_connected_email text
 alter table public.galleries add column if not exists drive_connected_name text;
 alter table public.galleries add column if not exists header_image_path text;
 alter table public.galleries add column if not exists common_access_pin text;
+alter table public.galleries add column if not exists personal_accent_color text;
+alter table public.galleries add column if not exists common_accent_color text;
 alter table public.galleries add column if not exists drive_links text[] not null default '{}';
 alter table public.galleries add column if not exists drive_folder_ids text[] not null default '{}';
 

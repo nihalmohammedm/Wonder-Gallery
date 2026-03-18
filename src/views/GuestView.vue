@@ -1,5 +1,5 @@
 <template>
-  <main class="app-shell space-y-6">
+  <main class="app-shell gallery-theme space-y-6" :style="themeStyle(personalAccentColor)">
     <section class="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
       <div class="space-y-6">
         <section
@@ -33,9 +33,9 @@
               </div>
 
               <div class="flex flex-wrap gap-3">
-                <Button :label="authBusy ? 'Preparing Camera' : 'Scan My Face'" icon="pi pi-camera" :loading="authBusy" @click="openScanModal" />
+                <Button :label="authBusy ? 'Preparing Camera' : 'Scan My Face'" icon="pi pi-camera" :loading="authBusy" :style="filledButtonStyle(personalAccentColor)" @click="openScanModal" />
                 <RouterLink :to="`/g/${slug}/all`">
-                  <Button label="Open Common Gallery" severity="secondary" outlined icon="pi pi-images" />
+                  <Button label="Open Common Gallery" severity="secondary" outlined icon="pi pi-images" :style="outlineButtonStyle(personalAccentColor)" />
                 </RouterLink>
               </div>
 
@@ -108,7 +108,7 @@
       <template #footer>
         <div class="flex w-full justify-end gap-3">
           <Button label="Cancel" severity="secondary" outlined :disabled="submitting" @click="closeScanModal" />
-          <Button label="Capture Selfie" icon="pi pi-camera" :disabled="cameraMode !== 'live' || submitting" @click="captureSelfie" />
+          <Button label="Capture Selfie" icon="pi pi-camera" :style="filledButtonStyle(personalAccentColor)" :disabled="cameraMode !== 'live' || submitting" @click="captureSelfie" />
         </div>
       </template>
     </Dialog>
@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import Button from "primevue/button";
 import Card from "primevue/card";
@@ -147,6 +147,8 @@ const submitting = ref(false);
 const scanModalMessage = ref("");
 const scanModalMessageSeverity = ref("error");
 let mediaStream;
+const DEFAULT_ACCENT_COLOR = "#0f5bd8";
+const personalAccentColor = computed(() => normalizeAccentColor(gallery.value?.personalAccentColor, DEFAULT_ACCENT_COLOR));
 
 onMounted(loadGallery);
 onBeforeUnmount(() => {
@@ -341,6 +343,41 @@ function bannerStyle(galleryRecord) {
     backgroundImage: `linear-gradient(180deg, rgba(9, 29, 57, 0.12), rgba(9, 29, 57, 0.12)), url("${galleryRecord.headerImageUrl}")`,
     backgroundPosition: "center",
     backgroundSize: "cover",
+  };
+}
+
+function normalizeAccentColor(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
+}
+
+function hexToRgbTuple(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return [1, 3, 5].map((index) => Number.parseInt(normalized.slice(index, index + 2), 16)).join(", ");
+}
+
+function themeStyle(color) {
+  return {
+    "--gallery-accent": normalizeAccentColor(color, DEFAULT_ACCENT_COLOR),
+    "--gallery-accent-rgb": hexToRgbTuple(color),
+  };
+}
+
+function filledButtonStyle(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return {
+    backgroundColor: normalized,
+    borderColor: normalized,
+    color: "#ffffff",
+  };
+}
+
+function outlineButtonStyle(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return {
+    borderColor: normalized,
+    color: normalized,
+    backgroundColor: "transparent",
   };
 }
 

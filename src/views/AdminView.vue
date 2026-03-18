@@ -228,6 +228,20 @@
           </div>
           <p class="helper-copy">Add one Google Drive folder per text field. All folders sync into this gallery.</p>
         </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">Personal link accent</label>
+          <div class="flex items-center gap-3">
+            <input v-model="galleryForm.personalAccentColor" type="color" class="h-11 w-16 rounded-[10px] border border-slate-200 bg-white p-1" />
+            <InputText v-model.trim="galleryForm.personalAccentColor" placeholder="#0f5bd8" />
+          </div>
+        </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">Common link accent</label>
+          <div class="flex items-center gap-3">
+            <input v-model="galleryForm.commonAccentColor" type="color" class="h-11 w-16 rounded-[10px] border border-slate-200 bg-white p-1" />
+            <InputText v-model.trim="galleryForm.commonAccentColor" placeholder="#0f5bd8" />
+          </div>
+        </div>
         <div class="flex items-center gap-3 md:col-span-2">
           <Checkbox v-model="galleryForm.isPublic" binary input-id="gallery-public" />
           <label for="gallery-public" class="text-sm text-slate-700">Public link enabled</label>
@@ -399,6 +413,8 @@ const galleryForm = reactive({
   title: "",
   slug: "",
   driveLinks: [""],
+  personalAccentColor: "#0f5bd8",
+  commonAccentColor: "#0f5bd8",
   isPublic: true,
 });
 
@@ -647,6 +663,8 @@ async function submitGallery() {
       title: galleryForm.title,
       slug: slugify(galleryForm.slug),
       driveLinks,
+      personalAccentColor: normalizeAccentColor(galleryForm.personalAccentColor, "#0f5bd8"),
+      commonAccentColor: normalizeAccentColor(galleryForm.commonAccentColor, "#0f5bd8"),
       isPublic: galleryForm.isPublic,
     });
     galleryFormFeedback.value = "Gallery saved.";
@@ -655,6 +673,8 @@ async function submitGallery() {
       title: "",
       slug: "",
       driveLinks: [""],
+      personalAccentColor: "#0f5bd8",
+      commonAccentColor: "#0f5bd8",
       isPublic: true,
     });
     await loadSnapshot();
@@ -683,6 +703,8 @@ function populateGalleryForm(gallery) {
     driveLinks: (gallery.driveLinks || [gallery.driveLink].filter(Boolean)).length
       ? [...(gallery.driveLinks || [gallery.driveLink].filter(Boolean))]
       : [""],
+    personalAccentColor: gallery.personalAccentColor || "#0f5bd8",
+    commonAccentColor: gallery.commonAccentColor || "#0f5bd8",
     isPublic: gallery.isPublic,
   });
 }
@@ -695,6 +717,8 @@ function openCreateGalleryDialog() {
     title: "",
     slug: "",
     driveLinks: [""],
+    personalAccentColor: "#0f5bd8",
+    commonAccentColor: "#0f5bd8",
     isPublic: true,
   });
   galleryFormDialogOpen.value = true;
@@ -1020,6 +1044,11 @@ function parseDriveLinks(values) {
   return (values || [])
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeAccentColor(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
 }
 
 function buildIndexingFeedback(indexing, fallbackMessage) {

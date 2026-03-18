@@ -1,5 +1,5 @@
 <template>
-  <main class="app-shell space-y-6">
+  <main class="app-shell gallery-theme space-y-6" :style="themeStyle(activeAccentColor)">
     <template v-if="isPersonalResults">
       <section class="space-y-6">
         <section class="hero-banner" :style="bannerStyle(gallery)">
@@ -43,7 +43,7 @@
                     @click="openProfileEditor"
                   />
                   <RouterLink v-if="profileSummaryVisible" :to="`/g/${slug}/all`">
-                    <Button label="View All Photos" icon="pi pi-images" />
+                    <Button label="View All Photos" icon="pi pi-images" :style="filledButtonStyle(personalAccentColor)" />
                   </RouterLink>
                 </div>
               </div>
@@ -62,7 +62,7 @@
                     outlined
                     @click="closeProfileEditor"
                   />
-                  <Button :label="savingProfile ? 'Saving...' : profileCompleted ? 'Save Changes' : 'Create Profile'" :loading="savingProfile" type="submit" />
+                  <Button :label="savingProfile ? 'Saving...' : profileCompleted ? 'Save Changes' : 'Create Profile'" :loading="savingProfile" :style="filledButtonStyle(personalAccentColor)" type="submit" />
                 </div>
               </form>
 
@@ -109,7 +109,7 @@
                   <Button label="Admin" severity="secondary" outlined icon="pi pi-home" />
                 </RouterLink>
                 <RouterLink :to="`/g/${slug}`">
-                  <Button label="Personal Link" icon="pi pi-camera" />
+                  <Button label="Personal Link" icon="pi pi-camera" :style="filledButtonStyle(commonAccentColor)" />
                 </RouterLink>
               </div>
             </div>
@@ -194,7 +194,7 @@
 
         <form class="grid gap-3" @submit.prevent="unlockCommonGallery">
           <InputText v-model.trim="commonPinInput" class="pin-input" type="text" inputmode="numeric" maxlength="4" placeholder="4-digit PIN" />
-          <Button :label="loadingCommonPhotos ? 'Unlocking...' : 'Open Gallery'" :loading="loadingCommonPhotos" type="submit" :disabled="commonPinInput.trim().length !== 4" />
+          <Button :label="loadingCommonPhotos ? 'Unlocking...' : 'Open Gallery'" :loading="loadingCommonPhotos" :style="filledButtonStyle(commonAccentColor)" type="submit" :disabled="commonPinInput.trim().length !== 4" />
         </form>
       </div>
     </Dialog>
@@ -273,6 +273,7 @@ const commonPinMessage = ref("");
 const commonPinMessageSeverity = ref("error");
 const editingProfile = ref(true);
 const personalAccessGranted = ref(false);
+const DEFAULT_ACCENT_COLOR = "#0f5bd8";
 
 const profileForm = reactive({
   name: "",
@@ -285,6 +286,9 @@ const isPersonalResults = computed(() => route.query.source === "personal" && Bo
 const profileCompleted = computed(() =>
   Boolean(personalResult.value?.profileCompleted || personalResult.value?.person?.email),
 );
+const personalAccentColor = computed(() => normalizeAccentColor(gallery.value?.personalAccentColor, DEFAULT_ACCENT_COLOR));
+const commonAccentColor = computed(() => normalizeAccentColor(gallery.value?.commonAccentColor, DEFAULT_ACCENT_COLOR));
+const activeAccentColor = computed(() => (isPersonalResults.value ? personalAccentColor.value : commonAccentColor.value));
 const profileFormVisible = computed(() => isPersonalResults.value && (!personalAccessGranted.value || editingProfile.value));
 const profileSummaryVisible = computed(() => isPersonalResults.value && personalAccessGranted.value && profileCompleted.value && !editingProfile.value);
 const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
@@ -606,6 +610,41 @@ function bannerStyle(galleryRecord) {
     backgroundImage: `url("${galleryRecord.headerImageUrl}")`,
     backgroundPosition: "center",
     backgroundSize: "cover",
+  };
+}
+
+function normalizeAccentColor(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
+}
+
+function hexToRgbTuple(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return [1, 3, 5].map((index) => Number.parseInt(normalized.slice(index, index + 2), 16)).join(", ");
+}
+
+function themeStyle(color) {
+  return {
+    "--gallery-accent": normalizeAccentColor(color, DEFAULT_ACCENT_COLOR),
+    "--gallery-accent-rgb": hexToRgbTuple(color),
+  };
+}
+
+function filledButtonStyle(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return {
+    backgroundColor: normalized,
+    borderColor: normalized,
+    color: "#ffffff",
+  };
+}
+
+function outlineButtonStyle(color) {
+  const normalized = normalizeAccentColor(color, DEFAULT_ACCENT_COLOR);
+  return {
+    borderColor: normalized,
+    color: normalized,
+    backgroundColor: "transparent",
   };
 }
 

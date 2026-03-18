@@ -109,8 +109,14 @@ For a production deployment, replace those with:
 - `FACE_ENCODING_NUM_JITTERS`
 - `FACE_ENCODING_UPSAMPLE_TIMES`
 
+   For a deployed domain, `ADMIN_APP_URL` and `GOOGLE_OAUTH_REDIRECT_URI` must use that exact host. Example:
+   `ADMIN_APP_URL=https://picdrop.nihaal.in/admin`
+   `GOOGLE_OAUTH_REDIRECT_URI=https://picdrop.nihaal.in/api/google-drive/callback`
+
 6. In Google Cloud Console, create a web OAuth client for Drive access.
-   Add `http://localhost:5173` as an authorized JavaScript origin and `http://localhost:3000/api/google-drive/callback` as an authorized redirect URI.
+   Add the exact frontend origin and backend callback URL used by your environment.
+   Local example: authorized JavaScript origin `http://localhost:5173` and authorized redirect URI `http://localhost:3000/api/google-drive/callback`.
+   Deployed example: authorized JavaScript origin `https://picdrop.nihaal.in` and authorized redirect URI `https://picdrop.nihaal.in/api/google-drive/callback`.
 
 7. Start the face encoding API from [sidharthmenon/face_recognition_api](https://github.com/sidharthmenon/face_recognition_api).
    By default this app expects it at `http://localhost:8000`.

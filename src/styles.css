@@ -114,6 +114,20 @@ textarea {
   @apply rounded-[10px] border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900;
 }
 
+.gallery-theme .eyebrow {
+  color: var(--gallery-accent);
+}
+
+.gallery-theme .hero-banner-fallback {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(var(--gallery-accent-rgb), 0.18));
+}
+
+.gallery-theme .status-copy {
+  border-color: rgba(var(--gallery-accent-rgb), 0.18);
+  background: rgba(var(--gallery-accent-rgb), 0.08);
+  color: var(--gallery-accent);
+}
+
 .camera-preview {
   @apply h-full min-h-[20rem] w-full rounded-[10px] object-cover;
 }

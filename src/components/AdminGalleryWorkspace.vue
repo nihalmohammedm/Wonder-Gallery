@@ -98,6 +98,20 @@
                 </a>
               </div>
             </div>
+            <div class="surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Personal Accent</p>
+              <div class="mt-3 flex items-center gap-3">
+                <span class="h-8 w-8 rounded-[10px] border border-slate-200" :style="{ backgroundColor: selectedGallery.personalAccentColor || '#0f5bd8' }"></span>
+                <p class="text-sm font-medium text-slate-700">{{ selectedGallery.personalAccentColor || "#0f5bd8" }}</p>
+              </div>
+            </div>
+            <div class="surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Common Accent</p>
+              <div class="mt-3 flex items-center gap-3">
+                <span class="h-8 w-8 rounded-[10px] border border-slate-200" :style="{ backgroundColor: selectedGallery.commonAccentColor || '#0f5bd8' }"></span>
+                <p class="text-sm font-medium text-slate-700">{{ selectedGallery.commonAccentColor || "#0f5bd8" }}</p>
+              </div>
+            </div>
           </div>
 
           <div class="surface-muted p-4">
