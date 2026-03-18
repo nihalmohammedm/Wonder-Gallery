@@ -29,26 +29,27 @@ import {
   addPersonFaceEncoding,
   addPhoto,
   buildDriveThumbnailUrl,
-  updateGalleryHeaderImage,
-  refreshGalleryAccessPin,
-  findGalleryById,
-  findPhotoById,
-  findPersonById,
-  getGalleryBySlug,
-  updatePersonProfile,
   deleteGallery as deleteGalleryRecord,
+  getGalleryById,
   getGalleryDriveConnection,
+  getGalleryBySlug,
+  getPhotoById,
+  findPersonById,
   listDriveSyncStatesByGallery,
   listAllPersonEncodings,
+  listConnectedGalleriesForSync,
   listPhotosByGalleryId,
   listPersonFaceEncodings,
   listPhotoFacesByGallery,
   parseDriveId,
   readStore,
+  refreshGalleryAccessPin,
   replacePersonFaceEncodings,
   replacePhotoFacesForPhoto,
   saveGalleryDriveConnection,
   saveGalleryImage,
+  updateGalleryHeaderImage,
+  updatePersonProfile,
   upsertDrivePhoto,
   upsertGallery,
 } from "./store.js";
@@ -199,8 +200,7 @@ export function createApp() {
         return response.status(400).json({ error: "name, galleryId, and image are required" });
       }
 
-      const store = await readStore();
-      const gallery = findGalleryById(store, galleryId);
+      const gallery = await getGalleryById(galleryId);
 
       if (!gallery) {
         return response.status(404).json({ error: "Gallery not found" });
@@ -230,8 +230,7 @@ export function createApp() {
         return response.status(400).json({ error: "name and galleryId are required" });
       }
 
-      const store = await readStore();
-      const gallery = findGalleryById(store, galleryId);
+      const gallery = await getGalleryById(galleryId);
 
       if (!gallery) {
         return response.status(404).json({ error: "Gallery not found" });
@@ -284,8 +283,7 @@ export function createApp() {
         return response.status(400).json({ error: "galleryId, title, and driveLink are required" });
       }
 
-      const store = await readStore();
-      const gallery = findGalleryById(store, galleryId);
+      const gallery = await getGalleryById(galleryId);
 
       if (!gallery) {
         return response.status(404).json({ error: "Gallery not found" });
@@ -324,14 +322,13 @@ export function createApp() {
 
   app.post("/api/admin/photos/:photoId/index", async (request, response, next) => {
     try {
-      const store = await readStore();
-      const photo = findPhotoById(store, request.params.photoId);
+      const photo = await getPhotoById(request.params.photoId);
 
       if (!photo) {
         return response.status(404).json({ error: "Photo not found" });
       }
 
-      const gallery = findGalleryById(store, photo.galleryId);
+      const gallery = await getGalleryById(photo.galleryId);
 
       if (!gallery) {
         return response.status(404).json({ error: "Gallery not found" });
@@ -354,8 +351,7 @@ export function createApp() {
 
   app.get("/api/admin/galleries/:galleryId/drive-auth-url", async (request, response, next) => {
     try {
-      const store = await readStore();
-      const gallery = findGalleryById(store, request.params.galleryId);
+      const gallery = await getGalleryById(request.params.galleryId);
 
       if (!gallery) {
         return response.status(404).json({ error: "Gallery not found" });
@@ -637,8 +633,7 @@ async function requireAdminAuth(request, response, next) {
 }
 
 export async function syncGalleryDriveById(galleryId) {
-  const store = await readStore();
-  const gallery = findGalleryById(store, galleryId);
+  const gallery = await getGalleryById(galleryId);
 
   if (!gallery) {
     throw new Error("Gallery not found");
@@ -661,8 +656,9 @@ export async function syncAllConnectedGalleries() {
   autoSyncInProgress = true;
 
   try {
-    const store = await readStore();
-    const galleries = store.galleries.filter((gallery) => (gallery.driveFolderIds?.length || gallery.driveFolderId) && gallery.hasDriveConnection);
+    const galleries = (await listConnectedGalleriesForSync()).filter(
+      (gallery) => (gallery.driveFolderIds?.length || gallery.driveFolderId) && gallery.hasDriveConnection,
+    );
     const results = [];
 
     for (const gallery of galleries) {

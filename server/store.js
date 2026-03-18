@@ -2,12 +2,38 @@ import { getGalleryBucket, getStorageBucket, getSupabaseAdmin } from "./supabase
 
 const DEFAULT_PERSONAL_ACCENT_COLOR = "#0f5bd8";
 const DEFAULT_COMMON_ACCENT_COLOR = "#0f5bd8";
+const STORE_CACHE_TTL_MS = 5000;
+
+let cachedStoreValue = null;
+let cachedStoreExpiresAt = 0;
+let inflightStorePromise = null;
 
 export async function ensureStore() {
   getSupabaseAdmin();
 }
 
 export async function readStore() {
+  if (cachedStoreValue && cachedStoreExpiresAt > Date.now()) {
+    return cachedStoreValue;
+  }
+
+  if (inflightStorePromise) {
+    return inflightStorePromise;
+  }
+
+  inflightStorePromise = loadStoreSnapshot();
+
+  try {
+    const snapshot = await inflightStorePromise;
+    cachedStoreValue = snapshot;
+    cachedStoreExpiresAt = Date.now() + STORE_CACHE_TTL_MS;
+    return snapshot;
+  } finally {
+    inflightStorePromise = null;
+  }
+}
+
+async function loadStoreSnapshot() {
   const supabase = getSupabaseAdmin();
   const [galleriesResult, legacyGuestsResult, peopleResult, personEncodingsResult, photosResult, photoFacesResult] =
     await Promise.all([
@@ -106,6 +132,31 @@ export async function getGalleryBySlug(slug) {
   return result.data ? toGalleryRecord(result.data) : null;
 }
 
+export async function getGalleryById(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("galleries").select("*").eq("id", galleryId).maybeSingle();
+  throwIfError(result.error);
+  return result.data ? toGalleryRecord(result.data) : null;
+}
+
+export async function getPhotoById(photoId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("photos").select("*").eq("id", photoId).maybeSingle();
+  throwIfError(result.error);
+  return result.data ? toPhotoRecord(result.data, new Map()) : null;
+}
+
+export async function listConnectedGalleriesForSync() {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("galleries")
+    .select("*")
+    .not("drive_refresh_token", "is", null)
+    .order("created_at", { ascending: false });
+  throwIfError(result.error);
+  return Promise.all((result.data || []).map((row) => toGalleryRecord(row)));
+}
+
 export async function listPhotosByGalleryId(galleryId) {
   const supabase = getSupabaseAdmin();
   const [photosResult, photoFacesResult] = await Promise.all([
@@ -117,7 +168,18 @@ export async function listPhotosByGalleryId(galleryId) {
   throwIfError(photoFacesResult.error);
 
   const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
-  return Promise.all((photosResult.data || []).map((row) => toPhotoRecord(row, photoFaceCountByPhotoId)));
+  const photoStoragePathsByBucket = groupStoragePathsByBucket(photosResult.data || []);
+  const photoUrlMapsByBucket = new Map();
+
+  for (const [bucket, paths] of photoStoragePathsByBucket) {
+    photoUrlMapsByBucket.set(bucket, await createSignedUrlMap(bucket, paths));
+  }
+
+  return Promise.all(
+    (photosResult.data || []).map((row) =>
+      toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMapsByBucket.get(row.storage_bucket) || new Map()),
+    ),
+  );
 }
 
 export async function upsertGallery(input) {
@@ -150,6 +212,7 @@ export async function upsertGallery(input) {
       .select("*")
       .single();
     throwIfError(updateResult.error);
+    invalidateStoreCache();
     return await toGalleryRecord(updateResult.data);
   }
 
@@ -163,6 +226,7 @@ export async function upsertGallery(input) {
     .select("*")
     .single();
   throwIfError(insertResult.error);
+  invalidateStoreCache();
   return await toGalleryRecord(insertResult.data);
 }
 
@@ -181,6 +245,7 @@ export async function saveGalleryDriveConnection(input) {
     .single();
 
   throwIfError(updateResult.error);
+  invalidateStoreCache();
   return await toGalleryRecord(updateResult.data);
 }
 
@@ -197,6 +262,7 @@ export async function refreshGalleryAccessPin(galleryId) {
     .single();
 
   throwIfError(updateResult.error);
+  invalidateStoreCache();
   return await toGalleryRecord(updateResult.data);
 }
 
@@ -226,6 +292,7 @@ export async function updateGalleryHeaderImage(input) {
     .select("*")
     .single();
   throwIfError(updateResult.error);
+  invalidateStoreCache();
 
   return await toGalleryRecord(updateResult.data);
 }
@@ -275,6 +342,7 @@ export async function deleteGallery(galleryId) {
 
   const deleteResult = await supabase.from("galleries").delete().eq("id", galleryId).select("id").maybeSingle();
   throwIfError(deleteResult.error);
+  invalidateStoreCache();
 
   return {
     id: galleryResult.data.id,
@@ -322,6 +390,7 @@ export async function addPerson(input) {
     .select("*")
     .single();
   throwIfError(insertResult.error);
+  invalidateStoreCache();
   return toPersonRecord(insertResult.data, 0);
 }
 
@@ -340,6 +409,7 @@ export async function updatePersonProfile(input) {
     .select("*")
     .single();
   throwIfError(updateResult.error);
+  invalidateStoreCache();
 
   const encodingCount = await countPersonEncodings(updateResult.data.id);
   return toPersonRecord(updateResult.data, encodingCount);
@@ -392,6 +462,7 @@ export async function addPersonFaceEncoding(input) {
     throwIfError(updateResult.error);
   }
 
+  invalidateStoreCache();
   return toPersonFaceEncodingRecord(insertResult.data);
 }
 
@@ -416,6 +487,7 @@ export async function replacePersonFaceEncodings(personId) {
 
   const deleteResult = await supabase.from("person_face_encodings").delete().eq("person_id", personId);
   throwIfError(deleteResult.error);
+  invalidateStoreCache();
 }
 
 export async function listPersonFaceEncodings(personId) {
@@ -475,6 +547,7 @@ export async function addPhoto(input) {
     .select("*")
     .single();
   throwIfError(insertResult.error);
+  invalidateStoreCache();
   return toPhotoRecord(insertResult.data, new Map());
 }
 
@@ -514,6 +587,7 @@ export async function upsertDrivePhoto(input) {
       .select("*")
       .single();
     throwIfError(updateResult.error);
+    invalidateStoreCache();
     return toPhotoRecord(updateResult.data, new Map());
   }
 
@@ -528,6 +602,7 @@ export async function upsertDrivePhoto(input) {
     .select("*")
     .single();
   throwIfError(insertResult.error);
+  invalidateStoreCache();
   return toPhotoRecord(insertResult.data, new Map());
 }
 
@@ -572,6 +647,7 @@ export async function replacePhotoFacesForPhoto(input) {
 
   const insertResult = await supabase.from("photo_faces").insert(insertPayload).select("*");
   throwIfError(insertResult.error);
+  invalidateStoreCache();
   return (insertResult.data || []).map(toPhotoFaceRecord);
 }
 
@@ -873,6 +949,11 @@ function normalizeTextArray(value) {
   }
 
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function invalidateStoreCache() {
+  cachedStoreValue = null;
+  cachedStoreExpiresAt = 0;
 }
 
 function normalizeAccentColor(value, fallback) {
