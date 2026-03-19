@@ -113,18 +113,6 @@ export function buildDriveThumbnailUrl(driveFileId) {
   return `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1200`;
 }
 
-export function findGalleryById(store, galleryId) {
-  return store.galleries.find((gallery) => gallery.id === galleryId);
-}
-
-export function findGalleryBySlug(store, slug) {
-  return store.galleries.find((gallery) => gallery.slug === slug);
-}
-
-export function findPhotoById(store, photoId) {
-  return store.photos.find((photo) => photo.id === photoId);
-}
-
 export async function getGalleryBySlug(slug) {
   const supabase = getSupabaseAdmin();
   const result = await supabase.from("galleries").select("*").eq("slug", slug).maybeSingle();
@@ -144,17 +132,6 @@ export async function getPhotoById(photoId) {
   const result = await supabase.from("photos").select("*").eq("id", photoId).maybeSingle();
   throwIfError(result.error);
   return result.data ? toPhotoRecord(result.data, new Map()) : null;
-}
-
-export async function listConnectedGalleriesForSync() {
-  const supabase = getSupabaseAdmin();
-  const result = await supabase
-    .from("galleries")
-    .select("*")
-    .not("drive_refresh_token", "is", null)
-    .order("created_at", { ascending: false });
-  throwIfError(result.error);
-  return Promise.all((result.data || []).map((row) => toGalleryRecord(row)));
 }
 
 export async function listPhotosByGalleryId(galleryId) {
@@ -190,8 +167,6 @@ export async function upsertGallery(input) {
   const payload = {
     title: input.title,
     slug: input.slug,
-    drive_link: input.driveLink,
-    drive_folder_id: input.driveFolderId,
     drive_links: input.driveLinks,
     drive_folder_ids: input.driveFolderIds,
     personal_accent_color: normalizeAccentColor(input.personalAccentColor, DEFAULT_PERSONAL_ACCENT_COLOR),
@@ -501,16 +476,6 @@ export async function listPersonFaceEncodings(personId) {
   return (result.data || []).map(toPersonFaceEncodingRecord);
 }
 
-export async function listGalleryPersonEncodings(galleryId) {
-  const supabase = getSupabaseAdmin();
-  const result = await supabase
-    .from("person_face_encodings")
-    .select("*")
-    .eq("gallery_id", galleryId);
-  throwIfError(result.error);
-  return (result.data || []).map(toPersonFaceEncodingRecord);
-}
-
 export async function listAllPersonEncodings() {
   const supabase = getSupabaseAdmin();
   const result = await supabase
@@ -686,6 +651,96 @@ export async function saveGalleryImage(fileName, buffer, mimeType) {
   };
 }
 
+export async function getStorageObjectBuffer(objectPath, bucket = getStorageBucket()) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.storage.from(bucket).download(objectPath);
+  throwIfError(result.error);
+
+  return {
+    bucket,
+    objectPath,
+    buffer: Buffer.from(await result.data.arrayBuffer()),
+  };
+}
+
+export async function createJob(input) {
+  const supabase = getSupabaseAdmin();
+  const insertResult = await supabase
+    .from("jobs")
+    .insert({
+      type: input.type,
+      status: "queued",
+      gallery_id: input.galleryId || null,
+      gallery_slug: input.gallerySlug || null,
+      photo_id: input.photoId || null,
+      person_id: input.personId || null,
+      requested_by: input.requestedBy || null,
+      input: input.input || {},
+      progress: {},
+      result: null,
+      error: null,
+      created_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  throwIfError(insertResult.error);
+  return toJobRecord(insertResult.data);
+}
+
+export async function findJobById(jobId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("jobs").select("*").eq("id", jobId).maybeSingle();
+  throwIfError(result.error);
+  return result.data ? toJobRecord(result.data) : null;
+}
+
+export async function markJobRunning(jobId, progress = {}) {
+  return updateJob(jobId, {
+    status: "running",
+    progress,
+    started_at: new Date().toISOString(),
+    error: null,
+  });
+}
+
+export async function markJobCompleted(jobId, resultPayload = {}, progress = {}) {
+  return updateJob(jobId, {
+    status: "completed",
+    result: resultPayload,
+    progress,
+    error: null,
+    finished_at: new Date().toISOString(),
+  });
+}
+
+export async function markJobFailed(jobId, errorMessage, progress = {}) {
+  return updateJob(jobId, {
+    status: "failed",
+    progress,
+    error: errorMessage || "Job failed",
+    finished_at: new Date().toISOString(),
+  });
+}
+
+export async function updateJob(jobId, patch) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase
+    .from("jobs")
+    .update({
+      status: patch.status,
+      progress: patch.progress,
+      result: patch.result,
+      error: patch.error,
+      started_at: patch.started_at,
+      finished_at: patch.finished_at,
+    })
+    .eq("id", jobId)
+    .select("*")
+    .single();
+  throwIfError(result.error);
+  return toJobRecord(result.data);
+}
+
 async function createSignedImageUrl(objectPath) {
   if (!objectPath) {
     return "";
@@ -746,8 +801,8 @@ async function toGalleryRecord(row, galleryUrlMap = null) {
   const headerImageUrl = galleryUrlMap?.get(row.header_image_path) || await createSignedStorageUrl(getGalleryBucket(), row.header_image_path);
   const driveLinks = normalizeTextArray(row.drive_links);
   const driveFolderIds = normalizeTextArray(row.drive_folder_ids);
-  const primaryDriveLink = driveLinks[0] || row.drive_link || "";
-  const primaryDriveFolderId = driveFolderIds[0] || row.drive_folder_id || "";
+  const primaryDriveLink = driveLinks[0] || "";
+  const primaryDriveFolderId = driveFolderIds[0] || "";
   return {
     id: row.id,
     title: row.title,
@@ -814,6 +869,26 @@ function toPhotoFaceRecord(row) {
     },
     encoding: row.encoding,
     createdAt: row.created_at,
+  };
+}
+
+function toJobRecord(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    galleryId: row.gallery_id || "",
+    gallerySlug: row.gallery_slug || "",
+    photoId: row.photo_id || "",
+    personId: row.person_id || "",
+    requestedBy: row.requested_by || "",
+    input: row.input || {},
+    progress: row.progress || {},
+    result: row.result,
+    error: row.error || "",
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
   };
 }
 

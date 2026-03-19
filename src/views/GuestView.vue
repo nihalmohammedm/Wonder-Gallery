@@ -262,22 +262,9 @@ async function submitMatch(formData) {
     submitting.value = true;
     status.value = "Matching your selfie against the gallery photos...";
     const response = await matchSelfie(props.slug, formData);
-    persistMatchPayload(response);
-
-    if (!response.match) {
-      status.value = buildNoMatchMessage(response);
-    } else {
-      status.value = `${response.match.photoCount} photo${response.match.photoCount === 1 ? "" : "s"} matched your selfie. Opening your gallery...`;
-    }
-    await router.push({
-      name: "gallery",
-      params: {
-        slug: props.slug,
-      },
-      query: {
-        source: "personal",
-      },
-    });
+    persistPendingMatch(response.job);
+    status.value = "Selfie received. Matching is now running in the background.";
+    await router.push(`/g/${props.slug}/all?source=personal&job=${encodeURIComponent(response.job.id)}`);
   } catch (error) {
     status.value = error.message || "Unable to process this selfie.";
   } finally {
@@ -285,17 +272,25 @@ async function submitMatch(formData) {
   }
 }
 
-function persistMatchPayload(response) {
+function persistPendingMatch(job) {
   const existing = readStoredMatch();
+  const existingPerson = existing?.person
+    ? {
+        ...existing.person,
+        // The next scan can replace the stored selfie object, which invalidates the old signed image URL.
+        referenceImageUrl: "",
+      }
+    : null;
   const payload = {
     gallery: gallery.value,
-    match: response.match,
-    diagnostics: response.diagnostics || null,
-    person: response.person || existing?.person || null,
+    jobId: job?.id || "",
+    jobStatus: job?.status || "queued",
+    pending: true,
+    match: null,
+    diagnostics: null,
+    person: existingPerson,
     selfieDataUrl: selfieDataUrl.value || existing?.selfieDataUrl || "",
-    status: response.match
-      ? `${response.match.photoCount} photo${response.match.photoCount === 1 ? "" : "s"} matched your selfie.`
-      : buildNoMatchMessage(response),
+    status: "Matching your selfie against the gallery photos...",
     savedAt: new Date().toISOString(),
   };
 

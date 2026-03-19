@@ -1,18 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 
 let supabaseClient;
-let publicOtpClient;
+function readPublicConfig() {
+  const runtimeConfig = typeof useRuntimeConfig === "function" ? useRuntimeConfig() : null;
+  const url =
+    runtimeConfig?.public?.supabaseUrl ||
+    import.meta.env?.NUXT_PUBLIC_SUPABASE_URL ||
+    "";
+  const anonKey =
+    runtimeConfig?.public?.supabaseAnonKey ||
+    import.meta.env?.NUXT_PUBLIC_SUPABASE_ANON_KEY ||
+    "";
+
+  return { url, anonKey };
+}
 
 export function getSupabaseBrowserClient() {
   if (supabaseClient) {
     return supabaseClient;
   }
 
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const { url, anonKey } = readPublicConfig();
 
   if (!url || !anonKey) {
-    throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.");
+    throw new Error("Missing Supabase browser configuration. Set SUPABASE_URL and NUXT_PUBLIC_SUPABASE_ANON_KEY.");
   }
 
   supabaseClient = createClient(url, anonKey, {
@@ -25,31 +36,6 @@ export function getSupabaseBrowserClient() {
   });
 
   return supabaseClient;
-}
-
-export function getSupabasePublicOtpClient() {
-  if (publicOtpClient) {
-    return publicOtpClient;
-  }
-
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.");
-  }
-
-  publicOtpClient = createClient(url, anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      flowType: "pkce",
-      storageKey: "picdrop-public-auth",
-    },
-  });
-
-  return publicOtpClient;
 }
 
 export async function getSession() {
@@ -90,33 +76,4 @@ export async function signOut() {
   if (error) {
     throw error;
   }
-}
-
-export async function getPublicOtpSession() {
-  const client = getSupabasePublicOtpClient();
-  await client.auth.initialize();
-  const { data, error } = await client.auth.getSession();
-
-  if (error) {
-    throw error;
-  }
-
-  return data.session || null;
-}
-
-export async function sendPublicEmailOtp(email, emailRedirectTo) {
-  const client = getSupabasePublicOtpClient();
-  const { data, error } = await client.auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: false,
-      emailRedirectTo,
-    },
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
 }

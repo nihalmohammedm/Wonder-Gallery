@@ -4,8 +4,6 @@ create table if not exists public.galleries (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   slug text not null unique,
-  drive_link text not null,
-  drive_folder_id text,
   drive_links text[] not null default '{}',
   drive_folder_ids text[] not null default '{}',
   common_access_pin text,
@@ -19,16 +17,6 @@ create table if not exists public.galleries (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
-
-alter table public.galleries add column if not exists drive_refresh_token text;
-alter table public.galleries add column if not exists drive_connected_email text;
-alter table public.galleries add column if not exists drive_connected_name text;
-alter table public.galleries add column if not exists header_image_path text;
-alter table public.galleries add column if not exists common_access_pin text;
-alter table public.galleries add column if not exists personal_accent_color text;
-alter table public.galleries add column if not exists common_accent_color text;
-alter table public.galleries add column if not exists drive_links text[] not null default '{}';
-alter table public.galleries add column if not exists drive_folder_ids text[] not null default '{}';
 
 create table if not exists public.guests (
   id uuid primary key default gen_random_uuid(),
@@ -104,21 +92,26 @@ create table if not exists public.person_face_encodings (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-alter table public.photos add column if not exists storage_bucket text;
-alter table public.photos add column if not exists storage_object_path text;
-alter table public.photos add column if not exists source_mime_type text;
-alter table public.photos add column if not exists drive_modified_time timestamptz;
-alter table public.photos add column if not exists drive_checksum text;
-alter table public.photos add column if not exists drive_file_size_bytes bigint;
-alter table public.photos add column if not exists image_width integer;
-alter table public.photos add column if not exists image_height integer;
-alter table public.photos add column if not exists face_index jsonb;
-alter table public.photos add column if not exists source text not null default 'manual';
-alter table public.persons add column if not exists email text;
-alter table public.persons add column if not exists phone text;
-alter table public.persons add column if not exists company text;
+create table if not exists public.jobs (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  status text not null default 'queued',
+  gallery_id uuid references public.galleries(id) on delete cascade,
+  gallery_slug text,
+  photo_id uuid references public.photos(id) on delete cascade,
+  person_id uuid references public.persons(id) on delete set null,
+  requested_by text,
+  input jsonb not null default '{}'::jsonb,
+  progress jsonb not null default '{}'::jsonb,
+  result jsonb,
+  error text,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now())
+);
 
-create unique index if not exists photos_gallery_drive_file_id_idx on public.photos(gallery_id, drive_file_id);
+create unique index if not exists photos_gallery_drive_file_id_idx
+  on public.photos(gallery_id, drive_file_id);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -160,3 +153,32 @@ alter table public.persons enable row level security;
 alter table public.photos enable row level security;
 alter table public.photo_faces enable row level security;
 alter table public.person_face_encodings enable row level security;
+alter table public.jobs enable row level security;
+
+drop policy if exists jobs_authenticated_select on public.jobs;
+create policy jobs_authenticated_select
+on public.jobs
+for select
+to authenticated
+using (true);
+
+drop policy if exists jobs_anon_face_match_select on public.jobs;
+create policy jobs_anon_face_match_select
+on public.jobs
+for select
+to anon
+using (type = 'face_match');
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'jobs'
+  ) then
+    alter publication supabase_realtime add table public.jobs;
+  end if;
+end
+$$;

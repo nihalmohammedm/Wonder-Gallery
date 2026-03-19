@@ -12,6 +12,7 @@
               Admin access uses Supabase email and password authentication. Use an allowed admin account to create galleries,
               sync Drive folders, upload headers, refresh common PINs, and manage gallery images.
             </p>
+            <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
           </div>
 
           <form class="grid w-full max-w-xl gap-3" @submit.prevent="login">
@@ -35,7 +36,7 @@
                   <p class="max-w-3xl text-base leading-7 text-slate-600">
                     Monitor the whole workspace first, then open any gallery card to manage that event in a dedicated panel.
                   </p>
-                  <p class="helper-copy">Signed in as <strong>{{ session.user?.email || "Unknown account" }}</strong></p>
+                  <p class="helper-copy">Signed in as <strong>{{ signedInEmail }}</strong></p>
                 </div>
 
                 <div class="flex flex-wrap gap-3">
@@ -347,12 +348,14 @@ import {
   deleteGallery,
   getAdminSnapshot,
   getDriveAuthUrl,
+  getJob,
   indexPhoto,
   refreshGalleryPin,
   syncGalleryDrive,
   uploadGalleryHeaderImage,
 } from "../lib/api.js";
 import { getSession, getSupabaseBrowserClient, signInWithPassword, signOut } from "../lib/auth.js";
+import { waitForJobResult } from "../lib/jobs.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -407,6 +410,7 @@ const photoForm = reactive({
 const selectedGallery = computed(() => galleries.value.find((gallery) => gallery.id === activeGalleryId.value) || galleries.value[0] || null);
 const totalImages = computed(() => photos.value.length);
 const totalFacesIndexed = computed(() => photos.value.reduce((total, photo) => total + (Number(photo.faceCount) || 0), 0));
+const signedInEmail = computed(() => session.value?.user?.email || "Unknown account");
 const isGalleryRoute = computed(() => Boolean(route.params.galleryId));
 const selectedGalleryPhotos = computed(() =>
   selectedGallery.value
@@ -653,7 +657,7 @@ async function submitGallery() {
     setActiveGallery(result.gallery.id);
     galleryFormDialogOpen.value = false;
     if (isGalleryRoute.value) {
-      await router.push({ name: "admin-gallery", params: { galleryId: result.gallery.id } });
+      await router.push(`/admin/galleries/${result.gallery.id}`);
     } else {
       galleryPanelOpen.value = true;
     }
@@ -727,7 +731,8 @@ async function submitPhoto() {
       driveLink: photoForm.driveLink,
       capturedAt: photoForm.capturedAt,
     });
-    feedback.value = buildIndexingFeedback(result.indexing, "Photo mapped.");
+    feedback.value = "Photo mapped. Indexing job queued.";
+    await waitForAdminJob(result.job?.id);
     setActiveGallery(photoForm.galleryId);
     Object.assign(photoForm, {
       galleryId: photoForm.galleryId,
@@ -748,7 +753,8 @@ async function runPhotoIndex(photo) {
     saving.indexPhotoId = photo.id;
     error.value = "";
     const result = await indexPhoto(photo.id);
-    feedback.value = buildIndexingFeedback(result.indexing, `Re-indexed ${photo.title}.`);
+    feedback.value = `Queued re-index for ${photo.title}.`;
+    await waitForAdminJob(result.job?.id);
     await loadSnapshot();
   } catch (indexError) {
     error.value = indexError.message;
@@ -762,16 +768,19 @@ async function syncDriveGallery(gallery) {
     saving.syncGalleryId = gallery.id;
     error.value = "";
     const result = await syncGalleryDrive(gallery.id);
-    const feedbackParts = [`Synced ${result.syncedCount} image${result.syncedCount === 1 ? "" : "s"} from Google Drive.`];
+    feedback.value = "Drive sync queued.";
+    const job = await waitForAdminJob(result.job?.id);
+    const payload = job?.result || {};
+    const feedbackParts = [`Synced ${payload.syncedCount || 0} image${payload.syncedCount === 1 ? "" : "s"} from Google Drive.`];
 
-    if (result.skippedCount) {
-      const skippedPreview = (result.skippedFiles || [])
+    if (payload.skippedCount) {
+      const skippedPreview = (payload.skippedFiles || [])
         .slice(0, 3)
         .map((file) => `${file.name}: ${file.reason}`)
         .join(" | ");
 
       feedbackParts.push(
-        `Skipped ${result.skippedCount} image${result.skippedCount === 1 ? "" : "s"}${skippedPreview ? ` (${skippedPreview})` : ""}.`,
+        `Skipped ${payload.skippedCount} image${payload.skippedCount === 1 ? "" : "s"}${skippedPreview ? ` (${skippedPreview})` : ""}.`,
       );
     }
 
@@ -819,7 +828,7 @@ async function removeGallery(gallery) {
     feedback.value = `Deleted ${result.gallery.title}.`;
 
     if (route.params.galleryId === gallery.id) {
-      await router.push({ name: "admin" });
+      await router.push("/admin");
     }
   } catch (deleteError) {
     error.value = deleteError.message;
@@ -878,7 +887,7 @@ function openGalleryPanel(galleryId) {
 async function openGalleryPage(galleryId) {
   setActiveGallery(galleryId);
   galleryPanelOpen.value = false;
-  await router.push({ name: "admin-gallery", params: { galleryId } });
+  await router.push(`/admin/galleries/${galleryId}`);
 }
 
 function galleryPhotoCount(galleryId) {
@@ -990,5 +999,12 @@ function buildIndexingFeedback(indexing, fallbackMessage) {
   }
 
   return `${fallbackMessage} Indexed ${indexing.faceCount || 0} face${indexing.faceCount === 1 ? "" : "s"} from ${indexing.syncSource === "thumbnail_fallback" ? "Drive thumbnail fallback" : "original image"}.`;
+}
+
+async function waitForAdminJob(jobId) {
+  return waitForJobResult({
+    jobId,
+    scope: "admin",
+  });
 }
 </script>

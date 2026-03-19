@@ -22,7 +22,13 @@
               <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div class="flex items-center gap-4">
                   <div class="grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-slate-200 bg-sky-50 text-lg font-semibold text-sky-700">
-                    <img v-if="profilePhotoUrl" :src="profilePhotoUrl" :alt="profileForm.name || 'Profile photo'" class="h-full w-full object-cover" />
+                    <img
+                      v-if="profilePhotoUrl"
+                      :src="profilePhotoUrl"
+                      :alt="profileForm.name || 'Profile photo'"
+                      class="h-full w-full object-cover"
+                      @error="handleProfilePhotoError"
+                    />
                     <span v-else>{{ profileInitials }}</span>
                   </div>
                   <div class="space-y-1">
@@ -251,6 +257,7 @@ import Message from "primevue/message";
 import Tag from "primevue/tag";
 import PageLoader from "../components/PageLoader.vue";
 import { getPublicGallery, getPublicGalleryPhotos, savePublicPersonProfile } from "../lib/api.js";
+import { waitForJobResult } from "../lib/jobs.js";
 
 const PERSONAL_MATCH_STORAGE_PREFIX = "picdrop-personal-match";
 
@@ -277,6 +284,8 @@ const commonPinMessage = ref("");
 const commonPinMessageSeverity = ref("error");
 const editingProfile = ref(true);
 const personalAccessGranted = ref(false);
+const loadingPersonalJob = ref(false);
+const failedProfilePhotoUrl = ref("");
 const DEFAULT_ACCENT_COLOR = "#0f5bd8";
 
 const profileForm = reactive({
@@ -298,7 +307,7 @@ const profileSummaryVisible = computed(() => isPersonalResults.value && personal
 const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
 const showCommonPinModal = computed(() => !isPersonalResults.value && gallery.value && !commonPinVerified.value);
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
-const showPageLoader = computed(() => loadingGallery.value || loadingCommonPhotos.value || savingProfile.value);
+const showPageLoader = computed(() => loadingGallery.value || loadingCommonPhotos.value || savingProfile.value || loadingPersonalJob.value);
 const currentPhotoIndex = computed(() => displayPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
 const hasPreviousPhoto = computed(() => currentPhotoIndex.value > 0);
 const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhotoIndex.value < displayPhotos.value.length - 1);
@@ -320,7 +329,23 @@ const latestDate = computed(() => {
     .sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
   return datedPhotos[0] ? formatDate(datedPhotos[0].capturedAt) : "No date";
 });
-const profilePhotoUrl = computed(() => personalResult.value?.person?.referenceImageUrl || personalResult.value?.selfieDataUrl || "");
+const profilePhotoUrl = computed(() => {
+  const referenceImageUrl = personalResult.value?.person?.referenceImageUrl || "";
+  const selfieDataUrl = personalResult.value?.selfieDataUrl || "";
+  const preferredUrl = personalResult.value?.pending && selfieDataUrl
+    ? selfieDataUrl
+    : referenceImageUrl || selfieDataUrl;
+
+  if (!preferredUrl) {
+    return "";
+  }
+
+  if (preferredUrl === failedProfilePhotoUrl.value) {
+    return preferredUrl === selfieDataUrl ? "" : selfieDataUrl;
+  }
+
+  return preferredUrl;
+});
 const profileInitials = computed(() => {
   const parts = (profileForm.name || "Guest")
     .split(/\s+/)
@@ -352,6 +377,7 @@ async function loadGallery() {
     gallery.value = galleryResponse.gallery;
 
     if (isPersonalResults.value) {
+      await syncPendingMatchJob();
       hydrateProfileForm();
       resetPersonalAccess();
       status.value = personalResult.value?.status || (profileCompleted.value
@@ -383,8 +409,71 @@ function restorePersonalMatch() {
   try {
     const stored = sessionStorage.getItem(matchStorageKey(props.slug));
     personalResult.value = stored ? JSON.parse(stored) : null;
+    if (!personalResult.value && route.query.job) {
+      personalResult.value = {
+        jobId: String(route.query.job),
+        jobStatus: "queued",
+        pending: true,
+        match: null,
+        diagnostics: null,
+        person: null,
+        selfieDataUrl: "",
+        status: "Matching your selfie against the gallery photos...",
+      };
+    }
   } catch {
     personalResult.value = null;
+  }
+}
+
+async function syncPendingMatchJob() {
+  const jobId = String(route.query.job || personalResult.value?.jobId || "").trim();
+
+  if (!jobId) {
+    return;
+  }
+
+  loadingPersonalJob.value = true;
+
+  try {
+    const job = await waitForJobResult({
+      jobId,
+      scope: "public",
+      onProgress(nextJob) {
+        personalResult.value = {
+          ...personalResult.value,
+          jobId,
+          jobStatus: nextJob.status,
+          pending: true,
+          status: "Matching your selfie against the gallery photos...",
+        };
+        persistPersonalResult();
+      },
+    });
+
+    const matchResult = job.result || {};
+    personalResult.value = {
+      ...personalResult.value,
+      ...matchResult,
+      jobId,
+      jobStatus: job.status,
+      pending: false,
+      status: matchResult.match
+        ? `${matchResult.match.photoCount} photo${matchResult.match.photoCount === 1 ? "" : "s"} matched your selfie.`
+        : buildNoMatchMessage(matchResult),
+    };
+    persistPersonalResult();
+  } catch (error) {
+    personalResult.value = {
+      ...personalResult.value,
+      jobId,
+      jobStatus: "failed",
+      pending: false,
+      status: error.message || "Unable to process this selfie.",
+    };
+    persistPersonalResult();
+  } finally {
+    loadingPersonalJob.value = false;
   }
 }
 
@@ -394,6 +483,10 @@ function hydrateProfileForm() {
   profileForm.email = person?.email || "";
   profileForm.phone = person?.phone || "";
   profileForm.company = person?.company || "";
+}
+
+function handleProfilePhotoError(event) {
+  failedProfilePhotoUrl.value = event.target?.currentSrc || profilePhotoUrl.value;
 }
 
 function resetPersonalAccess() {
@@ -575,6 +668,7 @@ function persistPersonalResult() {
     return;
   }
 
+  failedProfilePhotoUrl.value = "";
   sessionStorage.setItem(matchStorageKey(props.slug), JSON.stringify(personalResult.value));
 }
 
@@ -582,6 +676,28 @@ function driveDownloadUrl(photo) {
   return photo.driveFileId
     ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(photo.driveFileId)}`
     : photo.driveLink;
+}
+
+function buildNoMatchMessage(response) {
+  const parts = [];
+
+  if (response.diagnostics?.photoCount === 0) {
+    parts.push("No event photos are available in this gallery yet.");
+  } else if (response.diagnostics?.indexedPhotoCount === 0) {
+    parts.push("Photos exist, but none of them have been indexed for matching yet.");
+  } else {
+    parts.push("No confident photo match was found for this selfie.");
+  }
+
+  if (response.diagnostics?.bestScore != null) {
+    parts.push(`Best score ${response.diagnostics.bestScore} did not pass ${response.diagnostics.threshold}.`);
+  }
+
+  if ((response.diagnostics?.indexedPhotoCount || 0) > 0) {
+    parts.push("Use a clear front-facing selfie, and make sure the event photos have been synced recently.");
+  }
+
+  return parts.join(" ");
 }
 
 function formatDate(value) {
@@ -672,4 +788,5 @@ function dataUrlToFile(dataUrl, fileName) {
 
   return new File([bytes], fileName, { type: mimeType });
 }
+
 </script>

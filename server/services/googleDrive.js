@@ -146,7 +146,7 @@ export async function exchangeDriveCode(code, state) {
 }
 
 export function buildDriveCallbackRedirect({ status, galleryId, message }) {
-  const adminAppUrl = process.env.ADMIN_APP_URL || "http://localhost:5173/admin";
+  const adminAppUrl = process.env.ADMIN_APP_URL || "http://localhost:3000/admin";
   const url = new URL(adminAppUrl);
 
   url.searchParams.set("drive", status);
@@ -160,24 +160,6 @@ export function buildDriveCallbackRedirect({ status, galleryId, message }) {
   }
 
   return url.toString();
-}
-
-export function getDriveFileExtension(fileName, mimeType) {
-  const existingExtension = path.extname(fileName || "").toLowerCase();
-
-  if (existingExtension) {
-    return existingExtension.replace(".", "");
-  }
-
-  if (mimeType === "image/png") {
-    return "png";
-  }
-
-  if (mimeType === "image/webp") {
-    return "webp";
-  }
-
-  return "jpg";
 }
 
 export function isAllowedDriveImage(fileName, mimeType) {

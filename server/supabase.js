@@ -44,21 +44,6 @@ export async function verifySupabaseAccessToken(accessToken) {
   return result.data.user || null;
 }
 
-export function isAllowedAdminEmail(email) {
-  const configured = process.env.ADMIN_EMAILS;
-
-  if (!configured) {
-    return true;
-  }
-
-  const allowedEmails = configured
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-
-  return allowedEmails.includes((email || "").toLowerCase());
-}
-
 export async function ensureOtpAuthUser(email, metadata = {}) {
   const normalizedEmail = (email || "").trim().toLowerCase();
 

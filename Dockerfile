@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
@@ -11,7 +11,8 @@ RUN npm run build
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV REDIS_URL=redis://redis:6379
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["npm", "run", "start"]

@@ -55,7 +55,7 @@ export async function extractPhotoFaceEncodings(buffer, mimeType) {
   };
 }
 
-export async function createGalleryPreview(buffer, mimeType) {
+async function createGalleryPreview(buffer, mimeType) {
   return createStorageOptimizedImage(buffer, mimeType, {
     maxSize: PREVIEW_MAX_SIZE,
     quality: PREVIEW_JPEG_QUALITY,

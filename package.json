@@ -7,22 +7,23 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:client": "vite",
-    "dev:server": "nodemon server/index.js",
-    "build": "vite build",
-    "preview": "vite preview",
-    "start": "node server/index.js"
+    "dev": "concurrently \"npm run dev:web\" \"npm run dev:worker\"",
+    "dev:web": "nuxt dev --host",
+    "dev:worker": "nodemon worker/index.js",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "start": "nuxt start",
+    "worker": "node worker/index.js"
   },
   "dependencies": {
     "@primeuix/themes": "^2.0.3",
     "@supabase/supabase-js": "^2.56.1",
     "@tailwindcss/vite": "^4.2.1",
-    "cors": "^2.8.5",
+    "bullmq": "^5.41.5",
     "dotenv": "^16.6.1",
-    "express": "^5.1.0",
     "googleapis": "^150.0.1",
-    "multer": "^2.0.2",
+    "ioredis": "^5.4.2",
+    "nuxt": "^3.17.3",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
     "sharp": "^0.34.4",
@@ -31,7 +32,6 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.1",
     "concurrently": "^9.2.1",
     "nodemon": "^3.1.10",
     "vite": "^7.1.7"
