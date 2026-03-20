@@ -6,9 +6,6 @@
           <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div class="space-y-3">
               <p class="eyebrow">Selected Gallery</p>
-              <p class="max-w-2xl text-sm leading-6 text-slate-600">
-                Manage links, header image, Drive sync, and photos for this event.
-              </p>
             </div>
             <div class="flex flex-wrap gap-3">
               <Button label="Edit Gallery" severity="secondary" outlined icon="pi pi-pencil" @click="onEditGallery(selectedGallery)" />
@@ -55,14 +52,14 @@
             <div class="surface-muted p-4">
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Personal URL</p>
               <p class="mt-2 break-all text-sm text-slate-700">{{ personalUrl(selectedGallery.slug) }}</p>
-              <RouterLink :to="`/g/${selectedGallery.slug}`" class="mt-3 inline-block">
+              <RouterLink :to="`/g/${selectedGallery.slug}`" class="mt-3 inline-block" target="_blank" rel="noreferrer">
                 <Button label="Open" severity="secondary" outlined size="small" />
               </RouterLink>
             </div>
             <div class="surface-muted p-4">
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Common URL</p>
               <p class="mt-2 break-all text-sm text-slate-700">{{ commonUrl(selectedGallery.slug) }}</p>
-              <RouterLink :to="`/g/${selectedGallery.slug}/all`" class="mt-3 inline-block">
+              <RouterLink :to="`/g/${selectedGallery.slug}/all`" class="mt-3 inline-block" target="_blank" rel="noreferrer">
                 <Button label="Open" severity="secondary" outlined size="small" />
               </RouterLink>
             </div>
@@ -114,18 +111,24 @@
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div class="space-y-2">
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Header Image</p>
-                <p class="text-sm text-slate-600">Upload a banner image to brand the personal link and common gallery pages.</p>
               </div>
-              <label class="inline-flex cursor-pointer">
-                <input hidden type="file" accept="image/*" :disabled="saving.headerImageGalleryId === selectedGallery.id" @change="(event) => onUploadHeaderImage(event, selectedGallery)" />
-                <Button
-                  :label="saving.headerImageGalleryId === selectedGallery.id ? 'Uploading...' : selectedGallery.headerImageUrl ? 'Replace Header Image' : 'Upload Header Image'"
-                  severity="secondary"
-                  outlined
-                  icon="pi pi-image"
-                  :loading="saving.headerImageGalleryId === selectedGallery.id"
-                />
-              </label>
+              <input
+                ref="headerImageInputRef"
+                hidden
+                type="file"
+                accept="image/*"
+                :disabled="saving.headerImageGalleryId === selectedGallery.id"
+                @change="handleHeaderImageChange"
+              />
+              <Button
+                :label="saving.headerImageGalleryId === selectedGallery.id ? 'Uploading...' : selectedGallery.headerImageUrl ? 'Replace Header Image' : 'Upload Header Image'"
+                severity="secondary"
+                outlined
+                icon="pi pi-image"
+                :loading="saving.headerImageGalleryId === selectedGallery.id"
+                :disabled="saving.headerImageGalleryId === selectedGallery.id"
+                @click="openHeaderImagePicker"
+              />
             </div>
             <img
               v-if="selectedGallery.headerImageUrl"
@@ -144,7 +147,6 @@
           <div class="space-y-2">
             <p class="eyebrow">Photo Sources</p>
             <h2 class="section-title">Manual photo entry</h2>
-            <p class="helper-copy">Drive sync is the main ingestion path. Manual entries help when you need one image mapped immediately.</p>
           </div>
 
           <form class="grid gap-4 md:grid-cols-2" @submit.prevent="onSubmitPhoto">
@@ -179,7 +181,6 @@
             <div class="space-y-2">
               <p class="eyebrow">Gallery Images</p>
               <h2 class="section-title">{{ selectedGallery.title }}</h2>
-              <p class="helper-copy">Open an image, inspect it in full size, and download the original directly from Google Drive.</p>
             </div>
             <div v-if="selectedGalleryPhotos.length" class="flex flex-wrap gap-2">
               <Tag :value="`${selectedGalleryPhotos.length} images`" severity="contrast" rounded />
@@ -207,13 +208,14 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
 import Button from "primevue/button";
 import Card from "primevue/card";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 
-defineProps({
+const props = defineProps({
   selectedGallery: { type: Object, default: null },
   selectedGalleryPhotos: { type: Array, default: () => [] },
   galleries: { type: Array, default: () => [] },
@@ -233,4 +235,19 @@ defineProps({
   onSubmitPhoto: { type: Function, required: true },
   onOpenPhoto: { type: Function, required: true },
 });
+
+const headerImageInputRef = ref(null);
+
+function openHeaderImagePicker() {
+  headerImageInputRef.value?.click();
+}
+
+function handleHeaderImageChange(event) {
+  if (!props.selectedGallery) {
+    return;
+  }
+
+  props.onUploadHeaderImage(event, props.selectedGallery);
+  event.target.value = "";
+}
 </script>

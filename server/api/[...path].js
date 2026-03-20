@@ -11,6 +11,7 @@ import {
   addPhoto,
   deleteGallery as deleteGalleryRecord,
   findJobById,
+  findPersonById,
   getGalleryById,
   getGalleryBySlug,
   parseDriveId,
@@ -71,6 +72,10 @@ function toPublicJobResponse(job) {
   };
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
 export default defineEventHandler(async (event) => {
   applyRuntimeEnvToProcess();
 
@@ -114,6 +119,9 @@ export default defineEventHandler(async (event) => {
       }
 
       if (method === "GET" && matches(path, ["admin", "jobs", ":jobId"])) {
+        if (!isUuid(path[2])) {
+          throw createError({ statusCode: 400, statusMessage: "Invalid job ID." });
+        }
         const job = await findJobById(path[2]);
         if (!job) {
           throw createError({ statusCode: 404, statusMessage: "Job not found" });
@@ -248,6 +256,9 @@ export default defineEventHandler(async (event) => {
 
     if (path[0] === "public") {
       if (method === "GET" && matches(path, ["public", "jobs", ":jobId"])) {
+        if (!isUuid(path[2])) {
+          throw createError({ statusCode: 400, statusMessage: "Invalid job ID." });
+        }
         const job = await findJobById(path[2]);
         if (!job) {
           throw createError({ statusCode: 404, statusMessage: "Job not found" });
@@ -276,6 +287,20 @@ export default defineEventHandler(async (event) => {
 
         const photos = await listPhotosByGalleryId(gallery.id);
         return { gallery: toPublicGallery(gallery), photos };
+      }
+
+      if (method === "GET" && matches(path, ["public", "galleries", ":slug", "people", ":personId"])) {
+        const gallery = await getGalleryBySlug(path[2]);
+        if (!gallery || !gallery.isPublic) {
+          throw createError({ statusCode: 404, statusMessage: "Gallery not found or public access is disabled" });
+        }
+
+        const person = await findPersonById(path[4]);
+        if (!person || person.galleryId !== gallery.id) {
+          throw createError({ statusCode: 404, statusMessage: "Person not found" });
+        }
+
+        return { person };
       }
 
       if (method === "POST" && matches(path, ["public", "galleries", ":slug", "person-profile"])) {

@@ -152,6 +152,10 @@ export function getPublicGalleryPhotos(slug, pin = "") {
   return request(`/public/galleries/${slug}/photos${suffix}`);
 }
 
+export function getPublicPerson(slug, personId) {
+  return request(`/public/galleries/${slug}/people/${personId}`);
+}
+
 export function savePublicPersonProfile(slug, formData) {
   return request(`/public/galleries/${slug}/person-profile`, {
     method: "POST",

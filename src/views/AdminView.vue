@@ -2,18 +2,29 @@
   <main class="app-shell">
     <PageLoader v-if="showPageLoader" />
 
-    <Card v-if="authReady && !session" class="surface-panel">
+    <Card v-if="hasSessionVerificationError" class="surface-panel mx-auto w-full max-w-xl">
       <template #content>
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div class="space-y-3">
-            <p class="eyebrow">Admin Access</p>
-            <h1 class="page-title !text-4xl">Sign in to manage PicDrop</h1>
-            <p class="max-w-2xl text-base leading-7 text-slate-600">
-              Admin access uses Supabase email and password authentication. Use an allowed admin account to create galleries,
-              sync Drive folders, upload headers, refresh common PINs, and manage gallery images.
-            </p>
-            <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+        <div class="space-y-3 px-2 py-4 text-center sm:px-4 sm:py-5">
+          <p class="eyebrow text-[11px] tracking-[0.18em]">Admin Access</p>
+          <h1 class="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">Unable to open admin</h1>
+          <Message severity="error" :closable="false" class="text-sm">
+            {{ error }}
+          </Message>
+          <div class="flex justify-center pt-2">
+            <Button label="Log Out" severity="secondary" outlined icon="pi pi-sign-out" :loading="authBusy" @click="logout" />
           </div>
+        </div>
+      </template>
+    </Card>
+
+    <Card v-else-if="authReady && !session" class="surface-panel">
+      <template #content>
+          <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div class="space-y-3">
+              <p class="eyebrow">Admin Access</p>
+              <h1 class="page-title !text-4xl">Sign in to manage Kittiyo</h1>
+              <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+            </div>
 
           <form class="grid w-full max-w-xl gap-3" @submit.prevent="login">
             <InputText v-model.trim="loginForm.email" type="email" autocomplete="email" placeholder="Admin email" />
@@ -32,10 +43,7 @@
               <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
                 <div class="space-y-3">
                   <p class="eyebrow">Admin Dashboard</p>
-                  <h1 class="page-title !text-4xl">Pic Drop</h1>
-                  <p class="max-w-3xl text-base leading-7 text-slate-600">
-                    Monitor the whole workspace first, then open any gallery card to manage that event in a dedicated panel.
-                  </p>
+                  <h1 class="page-title !text-4xl">Kittiyo</h1>
                   <p class="helper-copy">Signed in as <strong>{{ signedInEmail }}</strong></p>
                 </div>
 
@@ -74,7 +82,6 @@
                 <div class="space-y-2">
                   <p class="eyebrow">Gallery Library</p>
                   <h2 class="section-title">Events</h2>
-                  <p class="helper-copy">Each card opens the gallery management panel.</p>
                 </div>
                 <div class="flex flex-wrap gap-3">
                   <Tag :value="`${galleries.length} event${galleries.length === 1 ? '' : 's'}`" severity="contrast" rounded />
@@ -208,7 +215,6 @@
             </div>
             <Button type="button" label="Add Folder" severity="secondary" outlined icon="pi pi-plus" @click="addDriveLinkField" />
           </div>
-          <p class="helper-copy">Add one Google Drive folder per text field. All folders sync into this gallery.</p>
         </div>
         <div class="space-y-2">
           <label class="text-sm font-medium text-slate-700">Personal link accent</label>
@@ -430,6 +436,7 @@ const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhoto
 const currentPhotoPositionLabel = computed(() =>
   currentPhotoIndex.value >= 0 ? `Image ${currentPhotoIndex.value + 1} of ${selectedGalleryPhotos.value.length}` : "",
 );
+const hasSessionVerificationError = computed(() => authReady.value && error.value === "Unable to verify your session");
 const showPageLoader = computed(() => !authReady.value || (Boolean(session.value) && loadingSnapshot.value && !hasLoadedSnapshot.value));
 
 let authSubscription;
