@@ -143,6 +143,9 @@ textarea {
 .page-loader-overlay {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
   z-index: 1200;
   display: grid;
   place-items: center;

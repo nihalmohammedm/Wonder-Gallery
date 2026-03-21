@@ -2,86 +2,100 @@
   <main class="app-shell gallery-theme space-y-6" :style="themeStyle(personalAccentColor)">
     <PageLoader v-if="showPageLoader" />
 
-    <section class="p-4 flex justify-center">
-      <div class="space-y-6 max-w-3xl">
-        <section
-          class="hero-banner"
-          :style="bannerStyle(gallery)"
-        >
-          <div v-if="!gallery?.headerImageUrl" class="hero-banner-fallback">
-            <h1 class="page-title">{{ gallery?.title || "Event Name" }}</h1>
-          </div>
-          <img
-            v-else
-            :src="gallery.headerImageUrl"
-            :alt="gallery.title || 'Gallery header'"
-            class="block h-64 w-full object-cover sm:h-80"
-          />
-        </section>
-
-        <Card class="surface-panel">
-          <template #content>
-            <div class="space-y-6">
-              <div class="space-y-3">
-                <p class="eyebrow">Personal Link</p>
-                <h2 class="section-title">Scan your face to find your photos</h2>
-                <p class="helper-copy">By clicking "Scan My Face," you consent to using your selfie and facial biometric data to identify and deliver your event photos.</p>
-              </div>
-
-              <div class="flex flex-wrap gap-3">
-                <Button :label="authBusy ? 'Preparing Camera' : 'Scan My Face'" icon="pi pi-camera" :loading="authBusy" :style="filledButtonStyle(personalAccentColor)" @click="openScanModal" />
-                <RouterLink :to="`/g/${slug}/all`">
-                  <Button label="Open Common Gallery" severity="secondary" outlined icon="pi pi-images" :style="outlineButtonStyle(personalAccentColor)" />
-                </RouterLink>
-              </div>
-
-              <div class="status-copy">{{ status }}</div>
-            </div>
-          </template>
-        </Card>
-      </div>
-
-    </section>
-
-    <Dialog
-      v-model:visible="scanModalOpen"
-      modal
-      dismissableMask
-      header="Live Capture"
-      :style="{ width: 'min(92vw, 34rem)' }"
-      @hide="closeScanModal"
-    >
-      <div class="space-y-4">
-        <div class="space-y-2">
-          <p class="eyebrow">Camera</p>
-          <h2 class="section-title !text-2xl">Smile, you are on camera</h2>
-        </div>
-
-        <Message v-if="scanModalMessage" :severity="scanModalMessageSeverity" :closable="false">
-          {{ scanModalMessage }}
-        </Message>
-
-        <div class="surface-muted overflow-hidden p-2">
-          <video v-show="cameraMode === 'live'" ref="videoRef" autoplay playsinline muted class="camera-preview"></video>
-          <img v-if="previewUrl" :src="previewUrl" alt="Captured selfie preview" class="camera-preview" />
-          <div v-if="cameraMode !== 'live' && !previewUrl" class="grid min-h-80 place-items-center rounded-[10px] bg-slate-100 text-sm text-slate-500">
-            Camera preview will appear here.
-          </div>
-        </div>
-
-        <div v-if="submitting" class="flex items-center gap-3 rounded-[10px] border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <ProgressSpinner strokeWidth="6" style="width: 1.5rem; height: 1.5rem" />
-          <span>Matching your selfie against the gallery photos...</span>
-        </div>
-      </div>
-
-      <template #footer>
-        <div class="flex w-full justify-end gap-3">
-          <Button label="Cancel" severity="secondary" outlined :disabled="submitting" @click="closeScanModal" />
-          <Button label="Capture Selfie" icon="pi pi-camera" :style="filledButtonStyle(personalAccentColor)" :disabled="cameraMode !== 'live' || submitting" @click="captureSelfie" />
+    <Card v-if="galleryUnavailableMessage" class="surface-panel mx-auto w-full max-w-xl">
+      <template #content>
+        <div class="space-y-3 px-2 py-4 text-center sm:px-4 sm:py-5">
+          <p class="eyebrow text-[11px] tracking-[0.18em]">Gallery</p>
+          <h1 class="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">Unable to open this gallery</h1>
+          <Message severity="error" :closable="false" class="text-sm">
+            {{ galleryUnavailableMessage }}
+          </Message>
         </div>
       </template>
-    </Dialog>
+    </Card>
+
+    <template v-else>
+      <section class="p-4 flex justify-center">
+        <div class="space-y-6 max-w-3xl">
+          <section
+            class="hero-banner"
+            :style="bannerStyle(gallery)"
+          >
+            <div v-if="!gallery?.headerImageUrl" class="hero-banner-fallback">
+              <h1 class="page-title">{{ gallery?.title || "Event Name" }}</h1>
+            </div>
+            <img
+              v-else
+              :src="gallery.headerImageUrl"
+              :alt="gallery.title || 'Gallery header'"
+              class="block h-64 w-full object-cover sm:h-80"
+            />
+          </section>
+
+          <Card class="surface-panel">
+            <template #content>
+              <div class="space-y-6">
+                <div class="space-y-3">
+                  <p class="eyebrow">Personal Link</p>
+                  <h2 class="section-title">Scan your face to find your photos</h2>
+                  <p class="helper-copy">By clicking "Scan My Face," you consent to using your selfie and facial biometric data to identify and deliver your event photos.</p>
+                </div>
+
+                <div class="flex flex-wrap gap-3">
+                  <Button :label="authBusy ? 'Preparing Camera' : 'Scan My Face'" icon="pi pi-camera" :loading="authBusy" :style="filledButtonStyle(personalAccentColor)" @click="openScanModal" />
+                  <RouterLink :to="`/g/${slug}/all`">
+                    <Button label="Open Common Gallery" severity="secondary" outlined icon="pi pi-images" :style="outlineButtonStyle(personalAccentColor)" />
+                  </RouterLink>
+                </div>
+
+                <div class="status-copy">{{ status }}</div>
+              </div>
+            </template>
+          </Card>
+        </div>
+
+      </section>
+
+      <Dialog
+        v-model:visible="scanModalOpen"
+        modal
+        dismissableMask
+        header="Live Capture"
+        :style="{ width: 'min(92vw, 34rem)' }"
+        @hide="closeScanModal"
+      >
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <p class="eyebrow">Camera</p>
+            <h2 class="section-title !text-2xl">Smile, you are on camera</h2>
+          </div>
+
+          <Message v-if="scanModalMessage" :severity="scanModalMessageSeverity" :closable="false">
+            {{ scanModalMessage }}
+          </Message>
+
+          <div class="surface-muted overflow-hidden p-2">
+            <video v-show="cameraMode === 'live'" ref="videoRef" autoplay playsinline muted class="camera-preview"></video>
+            <img v-if="previewUrl" :src="previewUrl" alt="Captured selfie preview" class="camera-preview" />
+            <div v-if="cameraMode !== 'live' && !previewUrl" class="grid min-h-80 place-items-center rounded-[10px] bg-slate-100 text-sm text-slate-500">
+              Camera preview will appear here.
+            </div>
+          </div>
+
+          <div v-if="submitting" class="flex items-center gap-3 rounded-[10px] border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            <ProgressSpinner strokeWidth="6" style="width: 1.5rem; height: 1.5rem" />
+            <span>Matching your selfie against the gallery photos...</span>
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="flex w-full justify-end gap-3">
+            <Button label="Cancel" severity="secondary" outlined :disabled="submitting" @click="closeScanModal" />
+            <Button label="Capture Selfie" icon="pi pi-camera" :style="filledButtonStyle(personalAccentColor)" :disabled="cameraMode !== 'live' || submitting" @click="captureSelfie" />
+          </div>
+        </template>
+      </Dialog>
+    </template>
   </main>
 </template>
 
@@ -118,6 +132,7 @@ const submitting = ref(false);
 const loadingGallery = ref(true);
 const scanModalMessage = ref("");
 const scanModalMessageSeverity = ref("error");
+const galleryUnavailableMessage = ref("");
 let mediaStream;
 const DEFAULT_ACCENT_COLOR = "#0f5bd8";
 const personalAccentColor = computed(() => normalizeAccentColor(gallery.value?.personalAccentColor, DEFAULT_ACCENT_COLOR));
@@ -133,9 +148,13 @@ async function loadGallery() {
   try {
     const response = await getPublicGallery(props.slug);
     gallery.value = response.gallery;
+    galleryUnavailableMessage.value = "";
     status.value = "Ready to scan. Capture a selfie to continue into your matched gallery.";
   } catch (error) {
     status.value = error.message;
+    if (isUnavailableGalleryError(error)) {
+      galleryUnavailableMessage.value = error.message;
+    }
   } finally {
     loadingGallery.value = false;
   }
@@ -371,5 +390,9 @@ function blobToDataUrl(blob) {
     reader.onerror = () => reject(new Error("Unable to read the captured selfie."));
     reader.readAsDataURL(blob);
   });
+}
+
+function isUnavailableGalleryError(error) {
+  return `${error?.message || ""}`.trim().toLowerCase() === "gallery not found or public access is disabled";
 }
 </script>

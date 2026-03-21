@@ -12,12 +12,15 @@ import {
   deleteGallery as deleteGalleryRecord,
   findJobById,
   findPersonById,
+  getAdminGalleryById,
+  getGalleryPhotoSummary,
   getGalleryById,
   getGalleryBySlug,
   parseDriveId,
   getPhotoById,
+  listPaginatedPhotosByGalleryId,
   listPhotosByGalleryId,
-  readStore,
+  listAdminGalleries,
   refreshGalleryAccessPin,
   saveGalleryDriveConnection,
   updateGalleryHeaderImage,
@@ -76,6 +79,11 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 }
 
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export default defineEventHandler(async (event) => {
   applyRuntimeEnvToProcess();
 
@@ -114,8 +122,21 @@ export default defineEventHandler(async (event) => {
     if (path[0] === "admin") {
       const adminUser = await requireAdminUser(event);
 
-      if (method === "GET" && matches(path, ["admin", "snapshot"])) {
-        return readStore();
+      if (method === "GET" && matches(path, ["admin", "galleries"])) {
+        return { galleries: await listAdminGalleries() };
+      }
+
+      if (method === "GET" && matches(path, ["admin", "galleries", ":galleryId"])) {
+        if (!isUuid(path[2])) {
+          throw createError({ statusCode: 400, statusMessage: "Invalid gallery ID." });
+        }
+
+        const gallery = await getAdminGalleryById(path[2]);
+        if (!gallery) {
+          throw createError({ statusCode: 404, statusMessage: "Gallery not found" });
+        }
+
+        return { gallery };
       }
 
       if (method === "GET" && matches(path, ["admin", "jobs", ":jobId"])) {
@@ -127,6 +148,23 @@ export default defineEventHandler(async (event) => {
           throw createError({ statusCode: 404, statusMessage: "Job not found" });
         }
         return { job: toAdminJobResponse(job) };
+      }
+
+      if (method === "GET" && matches(path, ["admin", "galleries", ":galleryId", "photos"])) {
+        if (!isUuid(path[2])) {
+          throw createError({ statusCode: 400, statusMessage: "Invalid gallery ID." });
+        }
+
+        const gallery = await getGalleryById(path[2]);
+        if (!gallery) {
+          throw createError({ statusCode: 404, statusMessage: "Gallery not found" });
+        }
+
+        const query = getQuery(event);
+        return listPaginatedPhotosByGalleryId(gallery.id, {
+          page: parsePositiveInteger(query.page, 1),
+          pageSize: parsePositiveInteger(query.pageSize, 20),
+        });
       }
 
       if (method === "POST" && matches(path, ["admin", "galleries"])) {
@@ -280,13 +318,24 @@ export default defineEventHandler(async (event) => {
           throw createError({ statusCode: 404, statusMessage: "Gallery not found or public access is disabled" });
         }
 
-        const pin = normalizeTextField(String(getQuery(event).pin || ""));
-        if (!pin || pin !== gallery.commonAccessPin) {
-          throw createError({ statusCode: 403, statusMessage: "A valid 4-digit PIN is required to open this gallery." });
-        }
+        const query = getQuery(event);
+        const pin = normalizeTextField(String(query.pin || ""));
+        assertGalleryPin(gallery, pin, "A valid 4-digit PIN is required to open this gallery.");
 
-        const photos = await listPhotosByGalleryId(gallery.id);
-        return { gallery: toPublicGallery(gallery), photos };
+        const [photoPage, summary] = await Promise.all([
+          listPaginatedPhotosByGalleryId(gallery.id, {
+            page: parsePositiveInteger(query.page, 1),
+            pageSize: parsePositiveInteger(query.pageSize, 20),
+          }),
+          getGalleryPhotoSummary(gallery.id),
+        ]);
+
+        return {
+          gallery: toPublicGallery(gallery),
+          photos: photoPage.photos,
+          pagination: photoPage.pagination,
+          summary,
+        };
       }
 
       if (method === "GET" && matches(path, ["public", "galleries", ":slug", "people", ":personId"])) {
@@ -295,10 +344,15 @@ export default defineEventHandler(async (event) => {
           throw createError({ statusCode: 404, statusMessage: "Gallery not found or public access is disabled" });
         }
 
+        const pin = normalizeTextField(String(getQuery(event).pin || ""));
+        const jobId = normalizeTextField(String(getQuery(event).jobId || ""));
+
         const person = await findPersonById(path[4]);
         if (!person || person.galleryId !== gallery.id) {
           throw createError({ statusCode: 404, statusMessage: "Person not found" });
         }
+
+        await assertPublicPersonAccess({ gallery, personId: person.id, pin, jobId });
 
         return { person };
       }
@@ -366,4 +420,32 @@ function parseDriveFileId(link) {
   }
 
   return "";
+}
+
+function assertGalleryPin(gallery, pin, statusMessage) {
+  if (!pin || pin !== gallery.commonAccessPin) {
+    throw createError({ statusCode: 403, statusMessage });
+  }
+}
+
+async function assertPublicPersonAccess({ gallery, personId, pin, jobId }) {
+  if (pin && pin === gallery.commonAccessPin) {
+    return;
+  }
+
+  if (!jobId) {
+    throw createError({ statusCode: 403, statusMessage: "A valid personal access token is required to view this person." });
+  }
+
+  const job = await findJobById(jobId);
+
+  if (
+    !job ||
+    job.type !== "face_match" ||
+    job.status !== "completed" ||
+    job.gallerySlug !== gallery.slug ||
+    `${job.result?.person?.id || ""}`.trim() !== personId
+  ) {
+    throw createError({ statusCode: 403, statusMessage: "A valid personal access token is required to view this person." });
+  }
 }

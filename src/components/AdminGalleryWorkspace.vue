@@ -182,23 +182,62 @@
               <p class="eyebrow">Gallery Images</p>
               <h2 class="section-title">{{ selectedGallery.title }}</h2>
             </div>
-            <div v-if="selectedGalleryPhotos.length" class="flex flex-wrap gap-2">
-              <Tag :value="`${selectedGalleryPhotos.length} images`" severity="contrast" rounded />
+            <div v-if="galleryPhotoCount" class="flex flex-wrap gap-2">
+              <Tag :value="`${galleryPhotoCount} image${galleryPhotoCount === 1 ? '' : 's'}`" severity="contrast" rounded />
               <Tag :value="`${galleryIndexedPhotoCount} indexed`" severity="info" rounded />
             </div>
           </div>
 
-          <div v-if="selectedGalleryPhotos.length" class="gallery-grid">
-            <button
-              v-for="photo in selectedGalleryPhotos"
-              :key="photo.id"
-              type="button"
-              @click="onOpenPhoto(photo)"
-            >
-              <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
-            </button>
+          <template v-if="visibleGalleryPhotos.length">
+            <div class="gallery-grid">
+              <button
+                v-for="photo in visibleGalleryPhotos"
+                :key="photo.id"
+                class="relative"
+                type="button"
+                @click="onOpenPhoto(photo)"
+              >
+                <span
+                  class="absolute top-2 right-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border text-sm shadow-sm"
+                  :class="isPhotoIndexed(photo) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white/95 text-slate-500'"
+                  :title="photoIndexLabel(photo)"
+                  :aria-label="photoIndexLabel(photo)"
+                >
+                  <i :class="isPhotoIndexed(photo) ? 'pi pi-check' : 'pi pi-minus'" aria-hidden="true"></i>
+                </span>
+                <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
+              </button>
+            </div>
+            <div v-if="showPagination" class="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-sm text-slate-500">{{ paginationSummary }}</p>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  label="Previous"
+                  severity="secondary"
+                  outlined
+                  icon="pi pi-angle-left"
+                  :disabled="loadingGalleryPhotos || pagination.page <= 1"
+                  @click="onChangePage(pagination.page - 1)"
+                />
+                <span class="text-sm font-medium text-slate-700">
+                  Page {{ pagination.page }} of {{ pagination.totalPages }}
+                </span>
+                <Button
+                  label="Next"
+                  severity="secondary"
+                  outlined
+                  icon="pi pi-angle-right"
+                  iconPos="right"
+                  :disabled="loadingGalleryPhotos || pagination.page >= pagination.totalPages"
+                  @click="onChangePage(pagination.page + 1)"
+                />
+              </div>
+            </div>
+          </template>
+          <div v-else-if="loadingGalleryPhotos" class="flex justify-center py-2 text-sm text-slate-500">
+            Loading images...
           </div>
-          <div v-else class="surface-muted p-4 text-sm text-slate-500">
+          <div v-else-if="!galleryPhotoCount" class="surface-muted p-4 text-sm text-slate-500">
             No images are mapped to this gallery yet.
           </div>
         </div>
@@ -208,7 +247,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import Button from "primevue/button";
 import Card from "primevue/card";
 import InputText from "primevue/inputtext";
@@ -218,6 +257,16 @@ import Tag from "primevue/tag";
 const props = defineProps({
   selectedGallery: { type: Object, default: null },
   selectedGalleryPhotos: { type: Array, default: () => [] },
+  galleryPagination: {
+    type: Object,
+    default: () => ({
+      page: 1,
+      pageSize: 20,
+      totalItems: 0,
+      totalPages: 0,
+    }),
+  },
+  loadingGalleryPhotos: { type: Boolean, default: false },
   galleries: { type: Array, default: () => [] },
   photoForm: { type: Object, required: true },
   saving: { type: Object, required: true },
@@ -234,9 +283,22 @@ const props = defineProps({
   onUploadHeaderImage: { type: Function, required: true },
   onSubmitPhoto: { type: Function, required: true },
   onOpenPhoto: { type: Function, required: true },
+  onChangeGalleryPage: { type: Function, required: true },
 });
 
 const headerImageInputRef = ref(null);
+const visibleGalleryPhotos = computed(() => props.selectedGalleryPhotos);
+const pagination = computed(() => props.galleryPagination);
+const showPagination = computed(() => pagination.value.totalPages > 1);
+const paginationSummary = computed(() => {
+  if (!pagination.value.totalItems) {
+    return "No images available.";
+  }
+
+  const start = (pagination.value.page - 1) * pagination.value.pageSize + 1;
+  const end = Math.min(start + visibleGalleryPhotos.value.length - 1, pagination.value.totalItems);
+  return `Showing ${start}-${end} of ${pagination.value.totalItems} images`;
+});
 
 function openHeaderImagePicker() {
   headerImageInputRef.value?.click();
@@ -249,5 +311,21 @@ function handleHeaderImageChange(event) {
 
   props.onUploadHeaderImage(event, props.selectedGallery);
   event.target.value = "";
+}
+
+function isPhotoIndexed(photo) {
+  if (typeof photo?.isIndexed === "boolean") {
+    return photo.isIndexed;
+  }
+
+  return Number(photo?.faceCount) > 0;
+}
+
+function photoIndexLabel(photo) {
+  return isPhotoIndexed(photo) ? "Indexed" : "Not indexed";
+}
+
+function onChangePage(page) {
+  props.onChangeGalleryPage(page);
 }
 </script>

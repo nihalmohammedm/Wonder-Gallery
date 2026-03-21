@@ -62,8 +62,12 @@ function buildNonJsonApiError(status, text) {
   return trimmed || `API returned a non-JSON response (${status}).`;
 }
 
-export function getAdminSnapshot() {
-  return request("/admin/snapshot", { auth: true });
+export function getAdminGalleries() {
+  return request("/admin/galleries", { auth: true });
+}
+
+export function getAdminGallery(galleryId) {
+  return request(`/admin/galleries/${galleryId}`, { auth: true });
 }
 
 export function createGallery(payload) {
@@ -141,19 +145,55 @@ export function getPublicGallery(slug) {
   return request(`/public/galleries/${slug}`);
 }
 
-export function getPublicGalleryPhotos(slug, pin = "") {
+export function getPublicGalleryPhotos(slug, pin = "", options = {}) {
   const params = new URLSearchParams();
 
   if (pin) {
     params.set("pin", pin);
   }
 
+  if (options.page) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.pageSize) {
+    params.set("pageSize", String(options.pageSize));
+  }
+
   const suffix = params.size ? `?${params.toString()}` : "";
   return request(`/public/galleries/${slug}/photos${suffix}`);
 }
 
-export function getPublicPerson(slug, personId) {
-  return request(`/public/galleries/${slug}/people/${personId}`);
+export function getAdminGalleryPhotos(galleryId, options = {}) {
+  const params = new URLSearchParams();
+
+  if (options.page) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.pageSize) {
+    params.set("pageSize", String(options.pageSize));
+  }
+
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return request(`/admin/galleries/${galleryId}/photos${suffix}`, {
+    auth: true,
+  });
+}
+
+export function getPublicPerson(slug, personId, options = {}) {
+  const params = new URLSearchParams();
+
+  if (options.pin) {
+    params.set("pin", options.pin);
+  }
+
+  if (options.jobId) {
+    params.set("jobId", options.jobId);
+  }
+
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return request(`/public/galleries/${slug}/people/${personId}${suffix}`);
 }
 
 export function savePublicPersonProfile(slug, formData) {

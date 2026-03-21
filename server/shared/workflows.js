@@ -3,7 +3,6 @@ import {
   createDriveSyncImage,
   extractPhotoFaceEncodings,
   extractPrimaryFaceEncoding,
-  findBestPersonMatch,
   sanitizeDriveImage,
 } from "../services/faceMatcher.js";
 import {
@@ -20,9 +19,8 @@ import {
   findPersonById,
   getGalleryById,
   getGalleryDriveConnection,
-  listAllPersonEncodings,
   listDriveSyncStatesByGallery,
-  listPersonFaceEncodings,
+  matchGalleryPersons,
   replacePersonFaceEncodings,
   replacePhotoFacesForPhoto,
   saveGalleryImage,
@@ -30,6 +28,8 @@ import {
 } from "../store.js";
 
 const DEFAULT_DRIVE_SYNC_CONCURRENCY = 3;
+const FACE_MATCH_RPC_THRESHOLD = 0.51;
+const PERSON_MATCH_RPC_COUNT = 250;
 
 export async function syncGalleryDriveById(galleryId) {
   const gallery = await getGalleryById(galleryId);
@@ -105,13 +105,10 @@ export async function indexManualPhotoIfPossible({ gallery, photo }) {
 }
 
 export async function getReferenceEncodingsForMatch({ person, galleryId, buffer, mimeType, extractedSelfieEncoding }) {
-  if (!person) {
-    if (extractedSelfieEncoding) {
-      return [extractedSelfieEncoding];
-    }
+  const referenceEncoding = extractedSelfieEncoding || await extractPrimaryFaceEncoding(buffer, mimeType, { persistUpload: false });
 
-    const encoding = await extractPrimaryFaceEncoding(buffer, mimeType, { persistUpload: false });
-    return [encoding];
+  if (!person) {
+    return [referenceEncoding];
   }
 
   await saveSelfieEncodingForPerson({
@@ -120,9 +117,10 @@ export async function getReferenceEncodingsForMatch({ person, galleryId, buffer,
     buffer,
     mimeType,
     source: "public_selfie",
+    extractedFace: referenceEncoding,
   });
 
-  return listPersonFaceEncodings(person.id);
+  return [referenceEncoding];
 }
 
 export async function detectExistingPersonForBuffer({ galleryId, buffer, mimeType }) {
@@ -134,8 +132,11 @@ export async function detectExistingPersonForBuffer({ galleryId, buffer, mimeTyp
 }
 
 export async function detectExistingPersonForEncoding({ galleryId, encoding }) {
-  const allPersonEncodings = await listAllPersonEncodings();
-  const personMatch = findBestPersonMatch(encoding, allPersonEncodings);
+  const matches = await matchGalleryPersons(galleryId, encoding, {
+    distanceThreshold: FACE_MATCH_RPC_THRESHOLD,
+    matchCount: PERSON_MATCH_RPC_COUNT,
+  });
+  const personMatch = matches[0] || null;
 
   if (!personMatch?.personId) {
     return null;
@@ -144,8 +145,10 @@ export async function detectExistingPersonForEncoding({ galleryId, encoding }) {
   return findPersonById(personMatch.personId);
 }
 
-export async function saveSelfieEncodingForPerson({ person, galleryId, buffer, mimeType, source }) {
-  const primaryFace = await extractPrimaryFaceEncoding(buffer, mimeType, { persistUpload: true });
+export async function saveSelfieEncodingForPerson({ person, galleryId, buffer, mimeType, source, extractedFace = null }) {
+  const primaryFace = extractedFace?.imagePath
+    ? extractedFace
+    : await extractPrimaryFaceEncoding(buffer, mimeType, { persistUpload: true });
 
   await replacePersonFaceEncodings(person.id);
 

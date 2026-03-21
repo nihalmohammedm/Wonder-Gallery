@@ -149,6 +149,8 @@
           <AdminGalleryWorkspace
             :selected-gallery="selectedGallery"
             :selected-gallery-photos="selectedGalleryPhotos"
+            :gallery-pagination="galleryPagination"
+            :loading-gallery-photos="loadingGalleryPhotos"
             :galleries="galleries"
             :photo-form="photoForm"
             :saving="saving"
@@ -165,6 +167,7 @@
             :on-upload-header-image="uploadHeaderImage"
             :on-submit-photo="submitPhoto"
             :on-open-photo="openPhoto"
+            :on-change-gallery-page="changeGalleryPage"
           />
         </section>
       </section>
@@ -265,6 +268,8 @@
         class="p-1"
         :selected-gallery="selectedGallery"
         :selected-gallery-photos="selectedGalleryPhotos"
+        :gallery-pagination="galleryPagination"
+        :loading-gallery-photos="loadingGalleryPhotos"
         :galleries="galleries"
         :photo-form="photoForm"
         :saving="saving"
@@ -281,6 +286,7 @@
         :on-upload-header-image="uploadHeaderImage"
         :on-submit-photo="submitPhoto"
         :on-open-photo="openPhoto"
+        :on-change-gallery-page="changeGalleryPage"
       />
     </Drawer>
 
@@ -306,9 +312,23 @@
 
         <div class="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              {{ currentPhotoPositionLabel }}
-            </p>
+            <div class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                {{ currentPhotoPositionLabel }}
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <Tag
+                  :value="activePhoto.isIndexed ? 'Indexed' : 'Not indexed'"
+                  :severity="activePhoto.isIndexed ? 'success' : 'secondary'"
+                  rounded
+                />
+                <Tag
+                  :value="`${activePhoto.faceCount || 0} face${Number(activePhoto.faceCount || 0) === 1 ? '' : 's'}`"
+                  severity="info"
+                  rounded
+                />
+              </div>
+            </div>
             <div class="flex flex-wrap justify-end gap-3">
               <Button label="Previous" severity="secondary" outlined icon="pi pi-angle-left" :disabled="!hasPreviousPhoto" @click="showPreviousPhoto" />
               <Button label="Next" severity="secondary" outlined icon="pi pi-angle-right" iconPos="right" :disabled="!hasNextPhoto" @click="showNextPhoto" />
@@ -352,7 +372,9 @@ import {
   createGallery,
   createPhoto,
   deleteGallery,
-  getAdminSnapshot,
+  getAdminGalleries,
+  getAdminGallery,
+  getAdminGalleryPhotos,
   getDriveAuthUrl,
   getJob,
   indexPhoto,
@@ -365,8 +387,11 @@ import { waitForJobResult } from "../lib/jobs.js";
 
 const route = useRoute();
 const router = useRouter();
+const DEFAULT_GALLERY_PAGE_SIZE = 20;
 const galleries = ref([]);
-const photos = ref([]);
+const selectedGalleryDetail = ref(null);
+const selectedGalleryPhotos = ref([]);
+const galleryPagination = ref(createPaginationState());
 const feedback = ref("");
 const error = ref("");
 const galleryFormFeedback = ref("");
@@ -375,9 +400,11 @@ const session = ref(null);
 const authReady = ref(false);
 const authBusy = ref(false);
 const loadingSnapshot = ref(false);
+const loadingGalleryPhotos = ref(false);
 const hasLoadedSnapshot = ref(false);
 const activeGalleryId = ref("");
 const activePhoto = ref(null);
+const activeGalleryPage = ref(1);
 const galleryPanelOpen = ref(false);
 const galleryFormDialogOpen = ref(false);
 const galleryFormMode = ref("create");
@@ -413,23 +440,27 @@ const photoForm = reactive({
   capturedAt: "",
 });
 
-const selectedGallery = computed(() => galleries.value.find((gallery) => gallery.id === activeGalleryId.value) || galleries.value[0] || null);
-const totalImages = computed(() => photos.value.length);
-const totalFacesIndexed = computed(() => photos.value.reduce((total, photo) => total + (Number(photo.faceCount) || 0), 0));
+const selectedGallerySummary = computed(() => galleries.value.find((gallery) => gallery.id === activeGalleryId.value) || galleries.value[0] || null);
+const selectedGallery = computed(() => {
+  const summary = selectedGallerySummary.value;
+
+  if (!summary) {
+    return null;
+  }
+
+  if (selectedGalleryDetail.value?.id === summary.id) {
+    return {
+      ...summary,
+      ...selectedGalleryDetail.value,
+    };
+  }
+
+  return summary;
+});
+const totalImages = computed(() => galleries.value.reduce((total, gallery) => total + (Number(gallery.photoCount) || 0), 0));
+const totalFacesIndexed = computed(() => galleries.value.reduce((total, gallery) => total + (Number(gallery.faceCount) || 0), 0));
 const signedInEmail = computed(() => session.value?.user?.email || "Unknown account");
 const isGalleryRoute = computed(() => Boolean(route.params.galleryId));
-const selectedGalleryPhotos = computed(() =>
-  selectedGallery.value
-    ? photos.value
-        .filter((photo) => photo.galleryId === selectedGallery.value.id)
-        .slice()
-        .sort((left, right) => {
-          const leftDate = left.capturedAt || left.createdAt || "";
-          const rightDate = right.capturedAt || right.createdAt || "";
-          return rightDate.localeCompare(leftDate);
-        })
-    : [],
-);
 const currentPhotoIndex = computed(() => selectedGalleryPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
 const hasPreviousPhoto = computed(() => currentPhotoIndex.value > 0);
 const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhotoIndex.value < selectedGalleryPhotos.value.length - 1);
@@ -478,7 +509,7 @@ watch(
   { immediate: true },
 );
 
-watch(selectedGallery, (gallery) => {
+watch(selectedGallerySummary, (gallery) => {
   if (!gallery) {
     photoForm.galleryId = "";
     return;
@@ -490,13 +521,38 @@ watch(selectedGallery, (gallery) => {
 });
 
 watch(
-  () => photos.value,
-  (nextPhotos) => {
-    if (!activePhoto.value) {
+  () => selectedGallerySummary.value?.id || "",
+  async (galleryId, previousGalleryId) => {
+    if (!galleryId) {
+      selectedGalleryDetail.value = null;
+      selectedGalleryPhotos.value = [];
+      galleryPagination.value = createPaginationState();
+      activePhoto.value = null;
       return;
     }
 
-    activePhoto.value = nextPhotos.find((photo) => photo.id === activePhoto.value.id) || null;
+    if (galleryId !== previousGalleryId) {
+      activeGalleryPage.value = 1;
+      activePhoto.value = null;
+      if (previousGalleryId) {
+        return;
+      }
+    }
+
+    await loadSelectedGalleryData(galleryId, activeGalleryPage.value);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => activeGalleryPage.value,
+  async (page, previousPage) => {
+    if (!selectedGallerySummary.value || page === previousPage) {
+      return;
+    }
+
+    activePhoto.value = null;
+    await loadSelectedGalleryData(selectedGallerySummary.value.id, page);
   },
 );
 
@@ -552,7 +608,10 @@ async function handleSessionChange(event, nextSession) {
 
 function clearSnapshot() {
   galleries.value = [];
-  photos.value = [];
+  selectedGalleryDetail.value = null;
+  selectedGalleryPhotos.value = [];
+  galleryPagination.value = createPaginationState();
+  activeGalleryPage.value = 1;
   activePhoto.value = null;
   hasLoadedSnapshot.value = false;
 }
@@ -566,10 +625,16 @@ async function loadSnapshot() {
     try {
       loadingSnapshot.value = true;
       error.value = "";
-      const snapshot = await getAdminSnapshot();
-      galleries.value = snapshot.galleries;
-      photos.value = snapshot.photos;
+      const response = await getAdminGalleries();
+      galleries.value = response.galleries || [];
       hasLoadedSnapshot.value = true;
+      if (selectedGallerySummary.value) {
+        await loadSelectedGalleryData(selectedGallerySummary.value.id, activeGalleryPage.value);
+      } else {
+        selectedGalleryDetail.value = null;
+        selectedGalleryPhotos.value = [];
+        galleryPagination.value = createPaginationState();
+      }
     } catch (loadError) {
       error.value = loadError.message;
     } finally {
@@ -583,6 +648,16 @@ async function loadSnapshot() {
   } finally {
     snapshotPromise = null;
   }
+}
+
+async function loadSelectedGalleryDetail(galleryId) {
+  if (!galleryId || !session.value) {
+    selectedGalleryDetail.value = null;
+    return;
+  }
+
+  const response = await getAdminGallery(galleryId);
+  selectedGalleryDetail.value = response.gallery || null;
 }
 
 async function handleDriveRedirectMessage() {
@@ -898,17 +973,18 @@ async function openGalleryPage(galleryId) {
 }
 
 function galleryPhotoCount(galleryId) {
-  return photos.value.filter((photo) => photo.galleryId === galleryId).length;
+  const gallery = resolveGalleryStatsSource(galleryId);
+  return Number(gallery?.photoCount) || 0;
 }
 
 function galleryIndexedPhotoCount(galleryId) {
-  return photos.value.filter((photo) => photo.galleryId === galleryId && photo.faceCount > 0).length;
+  const gallery = resolveGalleryStatsSource(galleryId);
+  return Number(gallery?.indexedPhotoCount) || 0;
 }
 
 function galleryFaceCount(galleryId) {
-  return photos.value
-    .filter((photo) => photo.galleryId === galleryId)
-    .reduce((total, photo) => total + (Number(photo.faceCount) || 0), 0);
+  const gallery = resolveGalleryStatsSource(galleryId);
+  return Number(gallery?.faceCount) || 0;
 }
 
 function openPhoto(photo) {
@@ -917,6 +993,54 @@ function openPhoto(photo) {
 
 function closePhoto() {
   activePhoto.value = null;
+}
+
+async function changeGalleryPage(page) {
+  const normalizedPage = normalizePositiveInteger(page, 1);
+  if (normalizedPage === activeGalleryPage.value) {
+    return;
+  }
+
+  activeGalleryPage.value = normalizedPage;
+}
+
+async function loadSelectedGalleryData(galleryId, page = 1) {
+  await Promise.all([
+    loadSelectedGalleryDetail(galleryId),
+    loadSelectedGalleryPhotos(galleryId, page),
+  ]);
+}
+
+async function loadSelectedGalleryPhotos(galleryId, page = 1) {
+  if (!galleryId || !session.value) {
+    selectedGalleryPhotos.value = [];
+    galleryPagination.value = createPaginationState();
+    return;
+  }
+
+  try {
+    loadingGalleryPhotos.value = true;
+    const response = await getAdminGalleryPhotos(galleryId, {
+      page,
+      pageSize: DEFAULT_GALLERY_PAGE_SIZE,
+    });
+    selectedGalleryPhotos.value = response.photos || [];
+    galleryPagination.value = response.pagination || createPaginationState();
+
+    if (galleryPagination.value.page !== activeGalleryPage.value) {
+      activeGalleryPage.value = galleryPagination.value.page;
+    }
+
+    if (activePhoto.value) {
+      activePhoto.value = selectedGalleryPhotos.value.find((photo) => photo.id === activePhoto.value.id) || null;
+    }
+  } catch (loadError) {
+    error.value = loadError.message;
+    selectedGalleryPhotos.value = [];
+    galleryPagination.value = createPaginationState();
+  } finally {
+    loadingGalleryPhotos.value = false;
+  }
 }
 
 function showPreviousPhoto() {
@@ -933,6 +1057,28 @@ function showNextPhoto() {
   }
 
   activePhoto.value = selectedGalleryPhotos.value[currentPhotoIndex.value + 1] || activePhoto.value;
+}
+
+function createPaginationState() {
+  return {
+    page: 1,
+    pageSize: DEFAULT_GALLERY_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 0,
+  };
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveGalleryStatsSource(galleryId) {
+  if (selectedGallery.value?.id === galleryId) {
+    return selectedGallery.value;
+  }
+
+  return galleries.value.find((item) => item.id === galleryId) || null;
 }
 
 function handleKeydown(event) {

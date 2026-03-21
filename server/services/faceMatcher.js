@@ -9,7 +9,6 @@ import { saveUpload } from "../store.js";
 import { extractFaceEncodings } from "./faceEncodingApi.js";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_FACE_DISTANCE_THRESHOLD = 0.51;
 const PREVIEW_MAX_SIZE = 1600;
 const PREVIEW_JPEG_QUALITY = 82;
 const REFERENCE_MAX_SIZE = 1280;
@@ -101,127 +100,6 @@ export async function sanitizeDriveImage(buffer, mimeType) {
   };
 }
 
-export function findPhotoMatches(referenceEncodings, photos, photoFaces) {
-  const validReferenceEncodings = (referenceEncodings || []).filter(
-    (reference) => Array.isArray(reference?.encoding) && reference.encoding.length,
-  );
-  const facesByPhotoId = groupFacesByPhotoId(photoFaces);
-  const scored = photos
-    .map((photo) => ({
-      photo,
-      ...scorePhoto(validReferenceEncodings, facesByPhotoId.get(photo.id) || []),
-    }))
-    .filter((photo) => Number.isFinite(photo.bestScore))
-    .sort((left, right) => left.bestScore - right.bestScore);
-
-  const threshold = getFaceDistanceThreshold();
-  const matches = scored
-    .filter((photo) => photo.bestScore <= threshold)
-    .map((photo) => ({
-      photo: photo.photo,
-      score: round(photo.bestScore),
-      regionId: photo.face?.id || null,
-      confidence: photo.bestScore <= 0.45 ? "high" : "medium",
-    }));
-
-  return {
-    matches,
-    diagnostics: {
-      model: "face_recognition_api-euclidean-v1",
-      threshold,
-      referenceEncodingCount: validReferenceEncodings.length,
-      photoCount: photos.length,
-      indexedPhotoCount: scored.length,
-      scannedRegionCount: scored.reduce((total, photo) => total + photo.regionCount, 0),
-      bestScore: scored[0] ? round(scored[0].bestScore) : null,
-    },
-  };
-}
-
-export function findBestPersonMatch(referenceEncoding, personEncodings) {
-  if (!Array.isArray(referenceEncoding) || !referenceEncoding.length) {
-    return null;
-  }
-
-  const bestByPersonId = new Map();
-
-  for (const candidate of personEncodings || []) {
-    const score = computeDistance(referenceEncoding, candidate.encoding);
-
-    if (!Number.isFinite(score)) {
-      continue;
-    }
-
-    const currentBest = bestByPersonId.get(candidate.personId);
-
-    if (!currentBest || score < currentBest.score) {
-      bestByPersonId.set(candidate.personId, {
-        personId: candidate.personId,
-        score,
-      });
-    }
-  }
-
-  const bestMatch = [...bestByPersonId.values()].sort((left, right) => left.score - right.score)[0];
-  const threshold = getFaceDistanceThreshold();
-
-  if (!bestMatch || bestMatch.score > threshold) {
-    return null;
-  }
-
-  return {
-    personId: bestMatch.personId,
-    score: round(bestMatch.score),
-    confidence: bestMatch.score <= 0.45 ? "high" : "medium",
-    threshold,
-  };
-}
-
-function scorePhoto(referenceEncodings, faces) {
-  if (!referenceEncodings.length || !faces.length) {
-    return {
-      bestScore: Number.POSITIVE_INFINITY,
-      face: null,
-      regionCount: faces.length,
-    };
-  }
-
-  let bestScore = Number.POSITIVE_INFINITY;
-  let bestFace = null;
-
-  for (const reference of referenceEncodings) {
-    for (const face of faces) {
-      const score = computeDistance(reference.encoding, face.encoding);
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestFace = face;
-      }
-    }
-  }
-
-  return {
-    bestScore,
-    face: bestFace,
-    regionCount: faces.length,
-  };
-}
-
-function computeDistance(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length || !left.length) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  let total = 0;
-
-  for (let index = 0; index < left.length; index += 1) {
-    const difference = left[index] - right[index];
-    total += difference * difference;
-  }
-
-  return Math.sqrt(total);
-}
-
 function pickPrimaryFace(faces) {
   return [...faces].sort((left, right) => faceArea(right.box) - faceArea(left.box))[0] || null;
 }
@@ -232,27 +110,6 @@ function faceArea(box) {
   }
 
   return Math.max(0, (box.right - box.left) * (box.bottom - box.top));
-}
-
-function groupFacesByPhotoId(photoFaces) {
-  const grouped = new Map();
-
-  for (const photoFace of photoFaces) {
-    const list = grouped.get(photoFace.photoId) || [];
-    list.push(photoFace);
-    grouped.set(photoFace.photoId, list);
-  }
-
-  return grouped;
-}
-
-function round(value) {
-  return Math.round(value * 10000) / 10000;
-}
-
-function getFaceDistanceThreshold() {
-  const parsed = Number(process.env.FACE_DISTANCE_THRESHOLD || DEFAULT_FACE_DISTANCE_THRESHOLD);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FACE_DISTANCE_THRESHOLD;
 }
 
 async function normalizeImageBuffer(buffer, mimeType) {

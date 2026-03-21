@@ -12,7 +12,7 @@ export async function ensureStore() {
   getSupabaseAdmin();
 }
 
-export async function readStore() {
+export async function listAdminGalleries() {
   if (cachedStoreValue && cachedStoreExpiresAt > Date.now()) {
     return cachedStoreValue;
   }
@@ -24,10 +24,10 @@ export async function readStore() {
   inflightStorePromise = loadStoreSnapshot();
 
   try {
-    const snapshot = await inflightStorePromise;
-    cachedStoreValue = snapshot;
+    const galleries = await inflightStorePromise;
+    cachedStoreValue = galleries;
     cachedStoreExpiresAt = Date.now() + STORE_CACHE_TTL_MS;
-    return snapshot;
+    return galleries;
   } finally {
     inflightStorePromise = null;
   }
@@ -35,57 +35,44 @@ export async function readStore() {
 
 async function loadStoreSnapshot() {
   const supabase = getSupabaseAdmin();
-  const [galleriesResult, legacyGuestsResult, peopleResult, personEncodingsResult, photosResult, photoFacesResult] =
+  const [galleriesResult, galleryStatsResult] =
     await Promise.all([
       supabase.from("galleries").select("*").order("created_at", { ascending: false }),
-      supabase.from("guests").select("*").order("created_at", { ascending: false }),
-      supabase.from("persons").select("*").order("created_at", { ascending: false }),
-      supabase.from("person_face_encodings").select("person_id"),
-      supabase.from("photos").select("*").order("created_at", { ascending: false }),
-      supabase.from("photo_faces").select("photo_id"),
+      supabase.rpc("gallery_photo_stats_all"),
     ]);
 
   throwIfError(galleriesResult.error);
-  throwIfError(legacyGuestsResult.error);
-  throwIfError(peopleResult.error);
-  throwIfError(personEncodingsResult.error);
-  throwIfError(photosResult.error);
-  throwIfError(photoFacesResult.error);
+  throwIfError(galleryStatsResult.error);
 
-  const personEncodingCountByPersonId = countById((personEncodingsResult.data || []).map((row) => row.person_id));
-  const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
   const galleryUrlMap = await createSignedUrlMap(
     getGalleryBucket(),
     (galleriesResult.data || []).map((row) => row.header_image_path),
   );
-  const referenceImageUrlMap = await createSignedUrlMap(
-    getStorageBucket(),
-    [...(legacyGuestsResult.data || []), ...(peopleResult.data || [])].map((row) => row.reference_image_path),
-  );
-  const photoStoragePathsByBucket = groupStoragePathsByBucket(photosResult.data || []);
-  const photoUrlMapsByBucket = new Map();
+  const galleryMetricsById = buildGalleryMetricsById(galleryStatsResult.data || []);
 
-  for (const [bucket, paths] of photoStoragePathsByBucket) {
-    photoUrlMapsByBucket.set(bucket, await createSignedUrlMap(bucket, paths));
-  }
-
-  const galleries = await Promise.all((galleriesResult.data || []).map((row) => toGalleryRecord(row, galleryUrlMap)));
-  const legacyGuests = await Promise.all((legacyGuestsResult.data || []).map((row) => toLegacyGuestRecord(row, referenceImageUrlMap)));
-  const people = await Promise.all(
-    (peopleResult.data || []).map((row) => toPersonRecord(row, personEncodingCountByPersonId.get(row.id) || 0, referenceImageUrlMap)),
-  );
-  const photos = await Promise.all(
-    (photosResult.data || []).map((row) =>
-      toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMapsByBucket.get(row.storage_bucket) || new Map()),
+  return Promise.all(
+    (galleriesResult.data || []).map((row) =>
+      toAdminGallerySummary(row, galleryUrlMap, galleryMetricsById.get(row.id)),
     ),
   );
+}
 
-  return {
-    galleries,
-    people,
-    guests: mergeGuests(legacyGuests, people),
-    photos,
-  };
+export async function getAdminGalleryById(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const [galleryResult, galleryStatsResult] = await Promise.all([
+    supabase.from("galleries").select("*").eq("id", galleryId).maybeSingle(),
+    supabase.rpc("gallery_photo_stats", { target_gallery_id: galleryId }),
+  ]);
+  throwIfError(galleryResult.error);
+  throwIfError(galleryStatsResult.error);
+
+  if (!galleryResult.data) {
+    return null;
+  }
+
+  const galleryUrlMap = await createSignedUrlMap(getGalleryBucket(), [galleryResult.data.header_image_path]);
+  const metrics = toGalleryMetrics(galleryStatsResult.data?.[0] || null);
+  return toGalleryRecord(galleryResult.data, galleryUrlMap, metrics);
 }
 
 export function parseDriveId(link) {
@@ -157,6 +144,197 @@ export async function listPhotosByGalleryId(galleryId) {
       toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMapsByBucket.get(row.storage_bucket) || new Map()),
     ),
   );
+}
+
+export async function listPaginatedPhotosByGalleryId(galleryId, options = {}) {
+  const supabase = getSupabaseAdmin();
+  const pageSize = normalizePositiveInteger(options.pageSize, 20);
+  const requestedPage = normalizePositiveInteger(options.page, 1);
+  const countResult = await supabase.from("photos").select("id", { count: "exact", head: true }).eq("gallery_id", galleryId);
+  throwIfError(countResult.error);
+
+  const totalItems = Number(countResult.count || 0);
+  const totalPages = totalItems ? Math.ceil(totalItems / pageSize) : 0;
+  const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
+
+  if (!totalItems) {
+    return {
+      photos: [],
+      pagination: {
+        page,
+        pageSize,
+        totalItems: 0,
+        totalPages: 0,
+      },
+    };
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const photosResult = await supabase
+    .from("photos")
+    .select("*")
+    .eq("gallery_id", galleryId)
+    .order("captured_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .range(from, to);
+  throwIfError(photosResult.error);
+
+  const photoIds = (photosResult.data || []).map((row) => row.id);
+  const photoFacesResult = photoIds.length
+    ? await supabase.from("photo_faces").select("photo_id").eq("gallery_id", galleryId).in("photo_id", photoIds)
+    : { data: [], error: null };
+  throwIfError(photoFacesResult.error);
+
+  const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
+  const indexedPhotoIds = new Set((photoFacesResult.data || []).map((row) => row.photo_id));
+  const photoStoragePathsByBucket = groupStoragePathsByBucket(photosResult.data || []);
+  const photoUrlMapsByBucket = new Map();
+
+  for (const [bucket, paths] of photoStoragePathsByBucket) {
+    photoUrlMapsByBucket.set(bucket, await createSignedUrlMap(bucket, paths));
+  }
+
+  return {
+    photos: await Promise.all(
+      (photosResult.data || []).map((row) =>
+        toPhotoRecord(
+          row,
+          photoFaceCountByPhotoId,
+          photoUrlMapsByBucket.get(row.storage_bucket) || new Map(),
+          indexedPhotoIds,
+        ),
+      ),
+    ),
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages,
+    },
+  };
+}
+
+export async function getGalleryPhotoSummary(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.from("photos").select("captured_at, created_at").eq("gallery_id", galleryId);
+  throwIfError(result.error);
+
+  const years = new Set();
+  let latestTimestamp = "";
+
+  for (const row of result.data || []) {
+    const sourceTimestamp = row.captured_at || row.created_at || "";
+    if (!sourceTimestamp) {
+      continue;
+    }
+
+    const date = new Date(sourceTimestamp);
+    if (!Number.isNaN(date.getTime())) {
+      years.add(date.getFullYear());
+    }
+
+    if (sourceTimestamp > latestTimestamp) {
+      latestTimestamp = sourceTimestamp;
+    }
+  }
+
+  return {
+    photoYears: years.size,
+    latestDate: latestTimestamp,
+  };
+}
+
+export async function getGalleryPhotoStats(galleryId) {
+  const supabase = getSupabaseAdmin();
+  const result = await supabase.rpc("gallery_photo_stats", { target_gallery_id: galleryId });
+  throwIfError(result.error);
+  return toGalleryMetrics(result.data?.[0] || null);
+}
+
+export async function matchGalleryPhotoFaces(galleryId, encoding, options = {}) {
+  const supabase = getSupabaseAdmin();
+  const vectorLiteral = encodingToVectorLiteral(encoding);
+
+  if (!vectorLiteral) {
+    return [];
+  }
+
+  const result = await supabase.rpc("match_gallery_photo_faces", {
+    target_gallery_id: galleryId,
+    query_embedding: vectorLiteral,
+    match_count: normalizePositiveInteger(options.matchCount, 200),
+    distance_threshold: normalizeDistanceThreshold(options.distanceThreshold, 0.51),
+  });
+  throwIfError(result.error);
+
+  return (result.data || []).map((row) => ({
+    photoId: row.photo_id,
+    faceId: row.face_id,
+    faceIndex: row.face_index,
+    distance: Number(row.distance),
+  }));
+}
+
+export async function matchGalleryPersons(galleryId, encoding, options = {}) {
+  const supabase = getSupabaseAdmin();
+  const vectorLiteral = encodingToVectorLiteral(encoding);
+
+  if (!vectorLiteral) {
+    return [];
+  }
+
+  const result = await supabase.rpc("match_gallery_persons", {
+    target_gallery_id: galleryId,
+    query_embedding: vectorLiteral,
+    match_count: normalizePositiveInteger(options.matchCount, 50),
+    distance_threshold: normalizeDistanceThreshold(options.distanceThreshold, 0.51),
+  });
+  throwIfError(result.error);
+
+  return (result.data || []).map((row) => ({
+    personId: row.person_id,
+    encodingId: row.encoding_id,
+    distance: Number(row.distance),
+  }));
+}
+
+export async function listPhotosByIds(photoIds) {
+  const normalizedPhotoIds = [...new Set((photoIds || []).filter(Boolean))];
+
+  if (!normalizedPhotoIds.length) {
+    return [];
+  }
+
+  const supabase = getSupabaseAdmin();
+  const [photosResult, photoFacesResult] = await Promise.all([
+    supabase.from("photos").select("*").in("id", normalizedPhotoIds),
+    supabase.from("photo_faces").select("photo_id").in("photo_id", normalizedPhotoIds),
+  ]);
+  throwIfError(photosResult.error);
+  throwIfError(photoFacesResult.error);
+
+  const photoFaceCountByPhotoId = countById((photoFacesResult.data || []).map((row) => row.photo_id));
+  const indexedPhotoIds = new Set((photoFacesResult.data || []).map((row) => row.photo_id));
+  const photoStoragePathsByBucket = groupStoragePathsByBucket(photosResult.data || []);
+  const photoUrlMapsByBucket = new Map();
+
+  for (const [bucket, paths] of photoStoragePathsByBucket) {
+    photoUrlMapsByBucket.set(bucket, await createSignedUrlMap(bucket, paths));
+  }
+
+  const records = await Promise.all(
+    (photosResult.data || []).map((row) =>
+      toPhotoRecord(
+        row,
+        photoFaceCountByPhotoId,
+        photoUrlMapsByBucket.get(row.storage_bucket) || new Map(),
+        indexedPhotoIds,
+      ),
+    ),
+  );
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  return normalizedPhotoIds.map((photoId) => recordById.get(photoId)).filter(Boolean);
 }
 
 export async function upsertGallery(input) {
@@ -274,17 +452,15 @@ export async function updateGalleryHeaderImage(input) {
 
 export async function deleteGallery(galleryId) {
   const supabase = getSupabaseAdmin();
-  const [galleryResult, photosResult, peopleResult, legacyGuestsResult] = await Promise.all([
+  const [galleryResult, photosResult, peopleResult] = await Promise.all([
     supabase.from("galleries").select("id, title, slug, header_image_path").eq("id", galleryId).maybeSingle(),
     supabase.from("photos").select("storage_bucket, storage_object_path").eq("gallery_id", galleryId),
     supabase.from("persons").select("reference_image_path").eq("gallery_id", galleryId),
-    supabase.from("guests").select("reference_image_path").eq("gallery_id", galleryId),
   ]);
 
   throwIfError(galleryResult.error);
   throwIfError(photosResult.error);
   throwIfError(peopleResult.error);
-  throwIfError(legacyGuestsResult.error);
 
   if (!galleryResult.data) {
     return null;
@@ -303,9 +479,7 @@ export async function deleteGallery(galleryId) {
   }
 
   const referenceImagePaths = new Set(
-    [...(peopleResult.data || []), ...(legacyGuestsResult.data || [])]
-      .map((row) => row.reference_image_path)
-      .filter(Boolean),
+    (peopleResult.data || []).map((row) => row.reference_image_path).filter(Boolean),
   );
 
   for (const [bucket, paths] of galleryImagePathsByBucket) {
@@ -417,10 +591,10 @@ export async function addPersonFaceEncoding(input) {
       box_right: sanitizeBoxValue(input.box?.right),
       box_bottom: sanitizeBoxValue(input.box?.bottom),
       box_left: sanitizeBoxValue(input.box?.left),
-      encoding: input.encoding,
+      embedding: encodingToVectorLiteral(input.encoding),
       created_at: new Date().toISOString(),
     })
-    .select("*")
+    .select("id, gallery_id, person_id, source, source_image_path, source_mime_type, box_top, box_right, box_bottom, box_left, embedding, created_at")
     .single();
   throwIfError(insertResult.error);
 
@@ -463,26 +637,6 @@ export async function replacePersonFaceEncodings(personId) {
   const deleteResult = await supabase.from("person_face_encodings").delete().eq("person_id", personId);
   throwIfError(deleteResult.error);
   invalidateStoreCache();
-}
-
-export async function listPersonFaceEncodings(personId) {
-  const supabase = getSupabaseAdmin();
-  const result = await supabase
-    .from("person_face_encodings")
-    .select("*")
-    .eq("person_id", personId)
-    .order("created_at", { ascending: false });
-  throwIfError(result.error);
-  return (result.data || []).map(toPersonFaceEncodingRecord);
-}
-
-export async function listAllPersonEncodings() {
-  const supabase = getSupabaseAdmin();
-  const result = await supabase
-    .from("person_face_encodings")
-    .select("*");
-  throwIfError(result.error);
-  return (result.data || []).map(toPersonFaceEncodingRecord);
 }
 
 export async function addPhoto(input) {
@@ -606,21 +760,14 @@ export async function replacePhotoFacesForPhoto(input) {
     box_right: sanitizeBoxValue(face.box?.right),
     box_bottom: sanitizeBoxValue(face.box?.bottom),
     box_left: sanitizeBoxValue(face.box?.left),
-    encoding: face.encoding,
+    embedding: encodingToVectorLiteral(face.encoding),
     created_at: new Date().toISOString(),
   }));
 
-  const insertResult = await supabase.from("photo_faces").insert(insertPayload).select("*");
+  const insertResult = await supabase.from("photo_faces").insert(insertPayload).select("id, gallery_id, photo_id, face_index, box_top, box_right, box_bottom, box_left, created_at");
   throwIfError(insertResult.error);
   invalidateStoreCache();
   return (insertResult.data || []).map(toPhotoFaceRecord);
-}
-
-export async function listPhotoFacesByGallery(galleryId) {
-  const supabase = getSupabaseAdmin();
-  const result = await supabase.from("photo_faces").select("*").eq("gallery_id", galleryId);
-  throwIfError(result.error);
-  return (result.data || []).map(toPhotoFaceRecord);
 }
 
 export async function saveUpload(fileName, buffer) {
@@ -764,19 +911,16 @@ async function createSignedStorageUrl(bucket, objectPath) {
   return signedResult.data?.signedUrl || "";
 }
 
-async function toLegacyGuestRecord(row, referenceImageUrlMap = null) {
+async function toAdminGallerySummary(row, galleryUrlMap = null, metrics = null) {
+  const headerImageUrl = galleryUrlMap?.get(row.header_image_path) || await createSignedStorageUrl(getGalleryBucket(), row.header_image_path);
   return {
     id: row.id,
-    galleryId: row.gallery_id,
-    name: row.name,
-    faceHash: row.face_hash,
-    faceProfile: row.face_profile,
-    referenceImagePath: row.reference_image_path,
-    referenceImageUrl: referenceImageUrlMap?.get(row.reference_image_path) || await createSignedImageUrl(row.reference_image_path),
-    selfieCount: row.face_profile?.encoding ? 1 : 0,
-    kind: "legacy_guest",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    title: row.title,
+    slug: row.slug,
+    headerImageUrl,
+    photoCount: metrics?.photoCount || 0,
+    indexedPhotoCount: metrics?.indexedPhotoCount || 0,
+    faceCount: metrics?.faceCount || 0,
   };
 }
 
@@ -797,7 +941,7 @@ async function toPersonRecord(row, selfieCount, referenceImageUrlMap = null) {
   };
 }
 
-async function toGalleryRecord(row, galleryUrlMap = null) {
+async function toGalleryRecord(row, galleryUrlMap = null, metrics = null) {
   const headerImageUrl = galleryUrlMap?.get(row.header_image_path) || await createSignedStorageUrl(getGalleryBucket(), row.header_image_path);
   const driveLinks = normalizeTextArray(row.drive_links);
   const driveFolderIds = normalizeTextArray(row.drive_folder_ids);
@@ -818,6 +962,9 @@ async function toGalleryRecord(row, galleryUrlMap = null) {
     headerImageUrl,
     hasDriveConnection: Boolean(row.drive_refresh_token),
     isPublic: row.is_public,
+    photoCount: metrics?.photoCount || 0,
+    indexedPhotoCount: metrics?.indexedPhotoCount || 0,
+    faceCount: metrics?.faceCount || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -827,7 +974,7 @@ function generateGalleryAccessPin() {
   return `${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
-async function toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMap = null) {
+async function toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMap = null, indexedPhotoIds = null) {
   const storageUrl = photoUrlMap?.get(row.storage_object_path) || await createSignedStorageUrl(row.storage_bucket, row.storage_object_path);
   return {
     id: row.id,
@@ -847,6 +994,7 @@ async function toPhotoRecord(row, photoFaceCountByPhotoId, photoUrlMap = null) {
     imageWidth: row.image_width,
     imageHeight: row.image_height,
     faceCount: photoFaceCountByPhotoId.get(row.id) || 0,
+    isIndexed: indexedPhotoIds ? indexedPhotoIds.has(row.id) : (photoFaceCountByPhotoId.get(row.id) || 0) > 0,
     capturedAt: row.captured_at,
     guestIds: row.guest_ids || [],
     source: row.source || "manual",
@@ -867,7 +1015,6 @@ function toPhotoFaceRecord(row) {
       bottom: row.box_bottom,
       left: row.box_left,
     },
-    encoding: row.encoding,
     createdAt: row.created_at,
   };
 }
@@ -906,7 +1053,7 @@ function toPersonFaceEncodingRecord(row) {
       bottom: row.box_bottom,
       left: row.box_left,
     },
-    encoding: row.encoding,
+    encoding: vectorLiteralToArray(row.embedding),
     createdAt: row.created_at,
   };
 }
@@ -1018,6 +1165,72 @@ function countById(ids) {
   return counts;
 }
 
+function buildGalleryMetricsById(galleryStatsRows) {
+  const metricsByGalleryId = new Map();
+
+  for (const row of galleryStatsRows || []) {
+    if (!row?.gallery_id) {
+      continue;
+    }
+
+    metricsByGalleryId.set(row.gallery_id, toGalleryMetrics(row));
+  }
+
+  return metricsByGalleryId;
+}
+
+function toGalleryMetrics(row) {
+  return {
+    photoCount: Number(row?.photo_count) || 0,
+    indexedPhotoCount: Number(row?.indexed_photo_count) || 0,
+    faceCount: Number(row?.face_count) || 0,
+  };
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeDistanceThreshold(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function encodingToVectorLiteral(encoding) {
+  if (!Array.isArray(encoding) || !encoding.length) {
+    return null;
+  }
+
+  const normalized = encoding
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+
+  if (!normalized.length || normalized.length !== encoding.length) {
+    return null;
+  }
+
+  return `[${normalized.join(",")}]`;
+}
+
+function vectorLiteralToArray(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+  }
+
+  const normalized = String(value || "").trim();
+
+  if (!normalized.startsWith("[") || !normalized.endsWith("]")) {
+    return [];
+  }
+
+  return normalized
+    .slice(1, -1)
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item));
+}
+
 function normalizeTextArray(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -1034,14 +1247,4 @@ function invalidateStoreCache() {
 function normalizeAccentColor(value, fallback) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
-}
-
-function mergeGuests(legacyGuests, people) {
-  const merged = new Map();
-
-  for (const guest of [...legacyGuests, ...people]) {
-    merged.set(guest.id, guest);
-  }
-
-  return [...merged.values()];
 }

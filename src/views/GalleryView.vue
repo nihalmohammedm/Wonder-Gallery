@@ -21,6 +21,20 @@
       </Card>
     </template>
 
+    <template v-else-if="galleryUnavailableMessage">
+      <Card class="surface-panel mx-auto w-full max-w-xl">
+        <template #content>
+          <div class="space-y-3 px-2 py-4 text-center sm:px-4 sm:py-5">
+            <p class="eyebrow text-[11px] tracking-[0.18em]">Gallery</p>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">Unable to open this gallery</h1>
+            <Message severity="error" :closable="false" class="text-sm">
+              {{ galleryUnavailableMessage }}
+            </Message>
+          </div>
+        </template>
+      </Card>
+    </template>
+
     <template v-else>
       <template v-if="isPersonalResults">
         <section class="space-y-6">
@@ -137,20 +151,20 @@
                 </div>
               </div>
 
-              <div v-if="canShowPhotos" class="grid gap-3 md:grid-cols-3">
-                <div class="surface-muted p-4">
-                  <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Total Photos</p>
-                  <p class="mt-2 text-2xl font-semibold text-slate-950">{{ displayPhotos.length }}</p>
+                <div v-if="canShowPhotos" class="grid gap-3 md:grid-cols-3">
+                  <div class="surface-muted p-4">
+                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Total Photos</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-950">{{ totalPhotoCount }}</p>
+                  </div>
+                  <div class="surface-muted p-4">
+                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Captured Years</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-950">{{ gallerySummary.photoYears }}</p>
+                  </div>
+                  <div class="surface-muted p-4">
+                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Latest Capture</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-950">{{ latestDate }}</p>
+                  </div>
                 </div>
-                <div class="surface-muted p-4">
-                  <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Captured Years</p>
-                  <p class="mt-2 text-2xl font-semibold text-slate-950">{{ photoYears }}</p>
-                </div>
-                <div class="surface-muted p-4">
-                  <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Latest Capture</p>
-                  <p class="mt-2 text-2xl font-semibold text-slate-950">{{ latestDate }}</p>
-                </div>
-              </div>
             </div>
           </section>
         </section>
@@ -168,7 +182,7 @@
               </div>
 
               <div v-if="canShowPhotos" class="flex flex-wrap gap-2">
-                <Tag :value="`${displayPhotos.length} image${displayPhotos.length === 1 ? '' : 's'}`" severity="contrast" rounded />
+                <Tag :value="`${totalPhotoCount} image${totalPhotoCount === 1 ? '' : 's'}`" severity="contrast" rounded />
                 <Tag
                   v-if="isPersonalResults && personalResult?.diagnostics?.bestScore != null"
                   :value="`Best score ${personalResult.diagnostics.bestScore}`"
@@ -178,16 +192,51 @@
               </div>
             </div>
 
-            <div v-if="canShowPhotos && displayPhotos.length" class="gallery-grid">
-              <button
-                v-for="photo in displayPhotos"
-                :key="photo.id"
-                type="button"
-                @click="openPhoto(photo)"
-              >
-                <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
-              </button>
-            </div>
+            <template v-if="canShowPhotos && displayPhotos.length">
+              <div class="gallery-grid">
+                <button
+                  v-for="photo in displayPhotos"
+                  :key="photo.id"
+                  type="button"
+                  class="relative"
+                  @click="openPhoto(photo)"
+                >
+                  <span
+                    v-if="SHOW_MATCH_SCORE_BADGE && isPersonalResults && photo.matchScore != null"
+                    class="absolute right-2 top-2 z-10 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-medium tracking-tight text-slate-700 shadow-sm"
+                  >
+                    {{ formatMatchScore(photo.matchScore) }}
+                  </span>
+                  <img :src="photo.storageImageUrl || photo.thumbnailUrl" :alt="photo.title" />
+                </button>
+              </div>
+
+              <div v-if="showCommonPagination" class="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p class="text-sm text-slate-500">{{ commonPaginationSummary }}</p>
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    label="Previous"
+                    severity="secondary"
+                    outlined
+                    icon="pi pi-angle-left"
+                    :disabled="loadingCommonPhotos || commonPagination.page <= 1"
+                    @click="goToPublicPage(commonPagination.page - 1)"
+                  />
+                  <span class="text-sm font-medium text-slate-700">
+                    Page {{ commonPagination.page }} of {{ commonPagination.totalPages }}
+                  </span>
+                  <Button
+                    label="Next"
+                    severity="secondary"
+                    outlined
+                    icon="pi pi-angle-right"
+                    iconPos="right"
+                    :disabled="loadingCommonPhotos || commonPagination.page >= commonPagination.totalPages"
+                    @click="goToPublicPage(commonPagination.page + 1)"
+                  />
+                </div>
+              </div>
+            </template>
 
             <div v-else class="surface-muted grid min-h-48 place-items-center p-8 text-center text-sm text-slate-500">
               {{ lockedOrEmptyMessage }}
@@ -262,8 +311,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import Button from "primevue/button";
 import Card from "primevue/card";
 import Dialog from "primevue/dialog";
@@ -275,6 +324,8 @@ import { getPublicGallery, getPublicGalleryPhotos, getPublicPerson, savePublicPe
 import { waitForJobResult } from "../lib/jobs.js";
 
 const PERSONAL_MATCH_STORAGE_PREFIX = "picdrop-personal-match";
+const DEFAULT_PAGE_SIZE = 20;
+const SHOW_MATCH_SCORE_BADGE = false;
 
 const props = defineProps({
   slug: {
@@ -284,8 +335,14 @@ const props = defineProps({
 });
 
 const route = useRoute();
+const router = useRouter();
 const gallery = ref(null);
 const photos = ref([]);
+const commonPagination = ref(createPaginationState());
+const gallerySummary = ref({
+  photoYears: 0,
+  latestDate: "",
+});
 const status = ref("Loading gallery...");
 const emptyMessage = ref("No gallery images are available yet.");
 const personalResult = ref(null);
@@ -302,6 +359,7 @@ const personalAccessGranted = ref(false);
 const loadingPersonalJob = ref(false);
 const failedProfilePhotoUrl = ref("");
 const invalidPersonalJobMessage = ref("");
+const galleryUnavailableMessage = ref("");
 const DEFAULT_ACCENT_COLOR = "#0f5bd8";
 
 const profileForm = reactive({
@@ -324,27 +382,38 @@ const profileSummaryVisible = computed(() => isPersonalResults.value && personal
 const canShowPhotos = computed(() => (isPersonalResults.value ? personalAccessGranted.value && profileCompleted.value : commonPinVerified.value));
 const showCommonPinModal = computed(() => !isPersonalResults.value && gallery.value && !commonPinVerified.value);
 const displayPhotos = computed(() => (isPersonalResults.value ? personalResult.value?.match?.photos || [] : photos.value));
-const showPageLoader = computed(() => loadingGallery.value || loadingCommonPhotos.value || savingProfile.value || loadingPersonalJob.value);
+const isFullGalleryRoute = computed(() => normalizeRoutePath(route.path) === `/g/${props.slug}/all`);
+const requestedPublicPage = computed(() => normalizePositiveInteger(route.query.page, 1));
+const showPageLoader = computed(() => loadingGallery.value || loadingCommonPhotos.value || savingProfile.value);
 const currentPhotoIndex = computed(() => displayPhotos.value.findIndex((photo) => photo.id === activePhoto.value?.id));
 const hasPreviousPhoto = computed(() => currentPhotoIndex.value > 0);
 const hasNextPhoto = computed(() => currentPhotoIndex.value >= 0 && currentPhotoIndex.value < displayPhotos.value.length - 1);
 const currentPhotoPositionLabel = computed(() =>
   currentPhotoIndex.value >= 0 ? `Image ${currentPhotoIndex.value + 1} of ${displayPhotos.value.length}` : "",
 );
-const photoYears = computed(() => {
-  const years = new Set(
-    displayPhotos.value
-      .map((photo) => (photo.capturedAt ? new Date(photo.capturedAt).getFullYear() : null))
-      .filter(Boolean),
-  );
-  return years.size || 0;
-});
+const totalPhotoCount = computed(() => (isPersonalResults.value ? displayPhotos.value.length : commonPagination.value.totalItems));
 const latestDate = computed(() => {
-  const datedPhotos = displayPhotos.value
-    .filter((photo) => photo.capturedAt)
-    .slice()
-    .sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
-  return datedPhotos[0] ? formatDate(datedPhotos[0].capturedAt) : "No date";
+  if (isPersonalResults.value) {
+    const datedPhotos = displayPhotos.value
+      .map((photo) => photo.capturedAt || photo.createdAt || "")
+      .filter(Boolean)
+      .sort((left, right) => right.localeCompare(left));
+    return datedPhotos[0] ? formatDate(datedPhotos[0]) : "No date";
+  }
+
+  return gallerySummary.value.latestDate ? formatDate(gallerySummary.value.latestDate) : "No date";
+});
+const showCommonPagination = computed(() =>
+  !isPersonalResults.value && canShowPhotos.value && commonPagination.value.totalPages > 1,
+);
+const commonPaginationSummary = computed(() => {
+  if (!commonPagination.value.totalItems) {
+    return "No images available.";
+  }
+
+  const start = (commonPagination.value.page - 1) * commonPagination.value.pageSize + 1;
+  const end = Math.min(start + displayPhotos.value.length - 1, commonPagination.value.totalItems);
+  return `Showing ${start}-${end} of ${commonPagination.value.totalItems} images`;
 });
 const profilePhotoUrl = computed(() => {
   const referenceImageUrl = personalResult.value?.person?.referenceImageUrl || "";
@@ -386,12 +455,30 @@ onMounted(loadGallery);
 onMounted(() => window.addEventListener("keydown", handleKeydown));
 onBeforeUnmount(() => window.removeEventListener("keydown", handleKeydown));
 
+watch(
+  () => route.query.page,
+  async (nextPage, previousPage) => {
+    if (
+      isPersonalResults.value ||
+      !isFullGalleryRoute.value ||
+      !commonPinVerified.value ||
+      normalizePositiveInteger(nextPage, 1) === normalizePositiveInteger(previousPage, 1)
+    ) {
+      return;
+    }
+
+    closePhoto();
+    await fetchCommonPhotos(commonPinInput.value, { silent: true });
+  },
+);
+
 async function loadGallery() {
   try {
     restorePersonalMatch();
 
     const galleryResponse = await getPublicGallery(props.slug);
     gallery.value = galleryResponse.gallery;
+    galleryUnavailableMessage.value = "";
 
     if (isPersonalResults.value) {
       const refreshedPerson = await refreshCurrentPerson(personalResult.value?.person || null);
@@ -416,14 +503,22 @@ async function loadGallery() {
       return;
     }
 
-    commonPinInput.value = "";
     commonPinVerified.value = false;
     commonPinMessage.value = "";
+    photos.value = [];
+    commonPagination.value = createPaginationState();
+    gallerySummary.value = {
+      photoYears: 0,
+      latestDate: "",
+    };
     status.value = "Enter the 4-digit PIN to unlock this gallery.";
     emptyMessage.value = "Enter the 4-digit PIN to unlock this gallery.";
   } catch (error) {
     status.value = error.message;
     emptyMessage.value = "This gallery is not available.";
+    if (isUnavailableGalleryError(error)) {
+      galleryUnavailableMessage.value = error.message;
+    }
   } finally {
     loadingGallery.value = false;
   }
@@ -530,6 +625,11 @@ function handleProfilePhotoError(event) {
   failedProfilePhotoUrl.value = event.target?.currentSrc || profilePhotoUrl.value;
 }
 
+function formatMatchScore(score) {
+  const numericScore = Number(score);
+  return Number.isFinite(numericScore) ? numericScore.toFixed(3) : String(score);
+}
+
 function resetPersonalAccess() {
   editingProfile.value = !profileCompleted.value;
   personalAccessGranted.value = profileCompleted.value;
@@ -552,6 +652,11 @@ async function saveProfile() {
 
   if (!profileForm.email.trim()) {
     status.value = "Email is required.";
+    return;
+  }
+
+  if (!currentPersonalJobId()) {
+    status.value = "Your personal access session expired. Please scan again.";
     return;
   }
 
@@ -586,6 +691,7 @@ async function saveProfile() {
     formData.set("email", profileForm.email.trim());
     formData.set("phone", profileForm.phone.trim());
     formData.set("company", profileForm.company.trim());
+    formData.set("jobId", currentPersonalJobId());
 
     if (!personalResult.value?.person?.id && personalResult.value?.selfieDataUrl) {
       formData.set("selfie", dataUrlToFile(personalResult.value.selfieDataUrl, "profile-selfie.jpg"));
@@ -630,13 +736,14 @@ async function saveProfile() {
 
 async function refreshCurrentPerson(person) {
   const personId = `${person?.id || ""}`.trim();
+  const jobId = currentPersonalJobId();
 
-  if (!personId) {
+  if (!personId || !jobId) {
     return person || null;
   }
 
   try {
-    const response = await getPublicPerson(props.slug, personId);
+    const response = await getPublicPerson(props.slug, personId, { jobId });
     return response.person || person || null;
   } catch {
     return person || null;
@@ -660,17 +767,35 @@ async function fetchCommonPhotos(pin, options = {}) {
   try {
     loadingCommonPhotos.value = true;
     commonPinMessage.value = "";
-    const response = await getPublicGalleryPhotos(props.slug, normalizedPin);
+    const response = await getPublicGalleryPhotos(props.slug, normalizedPin, {
+      page: isFullGalleryRoute.value ? requestedPublicPage.value : 1,
+      pageSize: DEFAULT_PAGE_SIZE,
+    });
     photos.value = response.photos;
+    commonPagination.value = response.pagination || createPaginationState();
+    gallerySummary.value = response.summary || {
+      photoYears: 0,
+      latestDate: "",
+    };
+    commonPinInput.value = normalizedPin;
     commonPinVerified.value = true;
-    status.value = `${response.photos.length} image${response.photos.length === 1 ? "" : "s"} available in this gallery.`;
+    status.value = `${commonPagination.value.totalItems} image${commonPagination.value.totalItems === 1 ? "" : "s"} available in this gallery.`;
 
-    if (!response.photos.length) {
+    if (isFullGalleryRoute.value && commonPagination.value.page !== requestedPublicPage.value) {
+      await syncPublicPage(commonPagination.value.page);
+    }
+
+    if (!commonPagination.value.totalItems) {
       emptyMessage.value = "This gallery does not have any mapped photos yet.";
     }
   } catch (error) {
     commonPinVerified.value = false;
     photos.value = [];
+    commonPagination.value = createPaginationState();
+    gallerySummary.value = {
+      photoYears: 0,
+      latestDate: "",
+    };
     commonPinMessageSeverity.value = "error";
     commonPinMessage.value = error.message || "Invalid gallery PIN.";
     if (!options.silent) {
@@ -688,6 +813,15 @@ function openPhoto(photo) {
 
 function closePhoto() {
   activePhoto.value = null;
+}
+
+async function goToPublicPage(page) {
+  const normalizedPage = normalizePositiveInteger(page, 1);
+  if (normalizedPage === requestedPublicPage.value) {
+    return;
+  }
+
+  await syncPublicPage(normalizedPage);
 }
 
 function showPreviousPhoto() {
@@ -735,6 +869,10 @@ function clearPersonalResult() {
   sessionStorage.removeItem(matchStorageKey(props.slug));
 }
 
+function currentPersonalJobId() {
+  return `${route.query.job || personalResult.value?.jobId || ""}`.trim();
+}
+
 function driveDownloadUrl(photo) {
   return photo.driveFileId
     ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(photo.driveFileId)}`
@@ -752,12 +890,8 @@ function buildNoMatchMessage(response) {
     parts.push("No confident photo match was found for this selfie.");
   }
 
-  if (response.diagnostics?.bestScore != null) {
-    parts.push(`Best score ${response.diagnostics.bestScore} did not pass ${response.diagnostics.threshold}.`);
-  }
-
   if ((response.diagnostics?.indexedPhotoCount || 0) > 0) {
-    parts.push("Use a clear front-facing selfie, and make sure the event photos have been synced recently.");
+    parts.push("Make sure you are using a clear front-facing selfie.");
   }
 
   return parts.join(" ");
@@ -773,6 +907,15 @@ function formatDate(value) {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
+}
+
+async function syncPublicPage(page) {
+  await router.replace({
+    query: {
+      ...route.query,
+      page: String(normalizePositiveInteger(page, 1)),
+    },
+  });
 }
 
 function heroStyle(galleryRecord) {
@@ -828,6 +971,15 @@ function outlineButtonStyle(color) {
   };
 }
 
+function createPaginationState() {
+  return {
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 0,
+  };
+}
+
 function matchStorageKey(slug) {
   return `${PERSONAL_MATCH_STORAGE_PREFIX}:${slug}`;
 }
@@ -849,6 +1001,20 @@ function dataUrlToFile(dataUrl, fileName) {
 function isInvalidJobError(error) {
   const message = `${error?.message || ""}`.trim().toLowerCase();
   return message === "job not found" || message === "invalid job id" || message === "invalid job id.";
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeRoutePath(path) {
+  const normalized = String(path || "").replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function isUnavailableGalleryError(error) {
+  return `${error?.message || ""}`.trim().toLowerCase() === "gallery not found or public access is disabled";
 }
 
 </script>

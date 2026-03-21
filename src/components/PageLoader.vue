@@ -1,19 +1,22 @@
 <template>
-  <div :class="wrapperClass" role="status" :aria-live="overlay ? 'polite' : 'off'">
+  <Teleport v-if="overlay" to="body">
+    <div class="page-loader-overlay" role="status" aria-live="polite">
+      <ProgressSpinner strokeWidth="5" class="page-loader-spinner" />
+    </div>
+  </Teleport>
+
+  <div v-else class="page-loader-inline" role="status" aria-live="off">
     <ProgressSpinner strokeWidth="5" class="page-loader-spinner" />
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue";
 import ProgressSpinner from "primevue/progressspinner";
 
-const props = defineProps({
+defineProps({
   overlay: {
     type: Boolean,
     default: true,
   },
 });
-
-const wrapperClass = computed(() => (props.overlay ? "page-loader-overlay" : "page-loader-inline"));
 </script>
